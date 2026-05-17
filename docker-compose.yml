@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  # שירות הפרונטאנד (React + Vite)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: always
+
+  # שירות הבקאנד (FastAPI + Supabase connectivity)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    # משתני סביבה מהקובץ המקומי
+    env_file:
+      - ./backend/.env
+    restart: always
