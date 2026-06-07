@@ -3,7 +3,10 @@
  * The backend is responsible for Supabase interactions.
  */
 
-const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+/** בפיתוח (npm run dev) משתמשים ב-Vite proxy — לא צריך לשנות .env */
+const API_URL = import.meta.env.DEV
+  ? ''
+  : (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000');
 
 export type ChatTurn = {
   role: 'user' | 'model';
@@ -32,6 +35,66 @@ export async function sendChatToBackend(messages: ChatTurn[]) {
 
   const data = (await response.json()) as { reply: string };
   return data.reply;
+}
+
+export type ProductDto = {
+  id: string;
+  name: string;
+  brand: string;
+  category: string;
+  price: number;
+  image_url: string | null;
+  stock: number;
+};
+
+export type ProductSearchResult = {
+  products: ProductDto[];
+  count: number;
+};
+
+export async function fetchProducts(): Promise<ProductSearchResult> {
+  const response = await fetch(`${API_URL}/api/products`);
+
+  if (!response.ok) {
+    let detail = 'שגיאה בטעינת מוצרים';
+    try {
+      const errorData = await response.json();
+      detail = typeof errorData.detail === 'string' ? errorData.detail : detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+
+  return (await response.json()) as ProductSearchResult;
+}
+
+export async function searchProducts(params: {
+  q?: string;
+  category?: string;
+}): Promise<ProductSearchResult> {
+  const searchParams = new URLSearchParams();
+  if (params.q?.trim()) searchParams.set('q', params.q.trim());
+  if (params.category?.trim()) searchParams.set('category', params.category.trim());
+
+  if (!searchParams.toString()) {
+    throw new Error('יש להזין מילת חיפוש');
+  }
+
+  const response = await fetch(`${API_URL}/api/products/search?${searchParams}`);
+
+  if (!response.ok) {
+    let detail = 'שגיאה בחיפוש מוצרים';
+    try {
+      const errorData = await response.json();
+      detail = typeof errorData.detail === 'string' ? errorData.detail : detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+
+  return (await response.json()) as ProductSearchResult;
 }
 
 export async function addSupabaseData(name: string, content: string) {

@@ -8,10 +8,10 @@ import {
 import ReactMarkdown from 'react-markdown';
 import { Toaster, toast } from 'sonner';
 import { cn } from './lib/utils';
-import { sendChatToBackend } from './lib/api';
+import { sendChatToBackend, addSupabaseData } from './lib/api';
 import { useAuth } from './hooks/useAuth';
 import { useClinicData } from './hooks/useClinicData';
-import { addSupabaseData } from './lib/api';
+import StorePage from './pages/StorePage';
 import { formatDisplayDate } from './lib/format';
 
 type Page = 'home' | 'consultation' | 'treatments' | 'booking' | 'store' | 'profile' | 'admin' | 'blog';
@@ -248,7 +248,6 @@ export default function App() {
               onAddToCart={addToCart} 
               cartCount={cart.length} 
               onCheckout={handlePlaceOrder}
-              catalogProducts={products}
             />
           )}
           {currentPage === 'booking' && (
@@ -731,59 +730,6 @@ function TreatmentsPage({ treatments: clinicTreatments, reviews, user, profile, 
           </div>
         )}
       </AnimatePresence>
-    </motion.div>
-  );
-}
-
-function StorePage({ onAddToCart, cartCount, onCheckout, catalogProducts }: { onAddToCart: (p: any) => void, cartCount: number, onCheckout: () => void, catalogProducts: any[] }) {
-  const defaultProducts = [
-    { name: 'סרום חומצה היאלורונית', brand: 'Aesthetics Pro', price: '₪280', img: 'https://images.unsplash.com/photo-1620916566398-39f1143ab7be?auto=format&fit=crop&q=80&w=400' },
-    { name: 'קרם לחות עשיר', brand: 'Aesthetics Pro', price: '₪220', img: 'https://images.unsplash.com/photo-1556228578-0d85b1a4d571?auto=format&fit=crop&q=80&w=400' },
-    { name: 'סבון פנים עדין', brand: 'Aesthetics Pro', price: '₪120', img: 'https://images.unsplash.com/photo-1556228578-8c89e6afd827?auto=format&fit=crop&q=80&w=400' },
-    { name: 'מסכת זהב 24K', brand: 'Luxury Care', price: '₪350', img: 'https://images.unsplash.com/photo-1596755389378-c31d21fd1273?auto=format&fit=crop&q=80&w=400' },
-  ];
-
-  const displayProducts = catalogProducts.length > 0 ? catalogProducts : defaultProducts;
-
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="max-w-7xl mx-auto px-6 py-12 space-y-12">
-      <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-        <div className="text-right space-y-2">
-          <h2 className="text-4xl serif font-semibold">חנות מוצרים</h2>
-          <p className="text-brand-dark/60">המוצרים הטובים ביותר לשגרת הטיפוח הביתית שלך</p>
-        </div>
-        {cartCount > 0 && (
-          <button 
-            onClick={onCheckout}
-            className="bg-brand-gold text-white px-8 py-3 rounded-full font-bold flex items-center gap-3 shadow-lg hover:scale-105 transition-transform"
-          >
-            <ShoppingBag size={20} />
-            בצעי הזמנה ({cartCount})
-          </button>
-        )}
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
-        {displayProducts.map((p, idx) => (
-          <div key={p.id || idx} className="bg-white rounded-3xl overflow-hidden border border-brand-gold/10 group">
-            <div className="aspect-square overflow-hidden">
-              <img src={p.img || p.imageUrl || 'https://picsum.photos/seed/cosmetics/400/400'} alt={p.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" referrerPolicy="no-referrer" />
-            </div>
-            <div className="p-6 space-y-2">
-              <div className="text-[10px] uppercase tracking-widest text-brand-gold font-bold">{p.brand}</div>
-              <h3 className="text-lg font-semibold">{p.name}</h3>
-              <div className="flex justify-between items-center pt-4">
-                <span className="text-xl font-bold">{typeof p.price === 'number' ? `₪${p.price}` : p.price}</span>
-                <button 
-                  onClick={() => onAddToCart(p)}
-                  className="bg-brand-dark text-white p-2 rounded-full hover:bg-brand-gold transition-colors"
-                >
-                  <ShoppingBag size={18} />
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
     </motion.div>
   );
 }

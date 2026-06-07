@@ -1,9 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from supabase import create_client, Client
-from typing import Literal
+from typing import Literal, Any
 import os
+import re
 from dotenv import load_dotenv
 
 from google import genai
@@ -105,6 +106,86 @@ class ChatResponse(BaseModel):
     reply: str
 
 
+class ProductOut(BaseModel):
+    id: str
+    name: str
+    brand: str
+    category: str
+    price: float
+    image_url: str | None = None
+    stock: int = 0
+
+
+class ProductSearchResponse(BaseModel):
+    products: list[ProductOut]
+    count: int
+
+
+def _sanitize_search_param(value: str | None, *, max_length: int = 120) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > max_length:
+        raise HTTPException(
+            status_code=400,
+            detail=f"פרמטר החיפוש ארוך מדי (מקסימום {max_length} תווים)",
+        )
+    if re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", cleaned):
+        raise HTTPException(status_code=400, detail="פרמטר חיפוש לא תקין")
+    return cleaned
+
+
+def _row_to_product(row: dict[str, Any]) -> ProductOut:
+    return ProductOut(
+        id=str(row["id"]),
+        name=row["name"],
+        brand=row.get("brand") or "",
+        category=row.get("category") or "",
+        price=float(row["price"]),
+        image_url=row.get("image_url"),
+        stock=int(row.get("stock") or 0),
+    )
+
+
+def _search_products_direct(
+    search_term: str | None,
+    category_filter: str | None,
+) -> list[dict[str, Any]]:
+    query = supabase.table("products").select("*")
+
+    if search_term:
+        pattern = f"{search_term}%"
+        query = query.or_(
+            f"name.ilike.{pattern},category.ilike.{pattern},brand.ilike.{pattern}"
+        )
+
+    if category_filter:
+        query = query.ilike("category", f"{category_filter}%")
+
+    response = query.order("name").execute()
+    return response.data or []
+
+
+def _search_products_in_supabase(
+    search_term: str | None,
+    category_filter: str | None,
+) -> list[ProductOut]:
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+
+    try:
+        rows = _search_products_direct(search_term, category_filter)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail="שגיאה בגישה לטבלת products ב-Supabase. בדקי SUPABASE_URL ו-SUPABASE_KEY ב-backend/.env",
+        ) from e
+
+    return [_row_to_product(row) for row in rows]
+
+
 def _messages_to_gemini_contents(messages: list[ChatTurn]) -> list[types.Content]:
     out: list[types.Content] = []
     for turn in messages:
@@ -124,6 +205,41 @@ def _last_user_question(messages: list[ChatTurn]) -> str:
 @app.get("/")
 def home():
     return {"message": "השרת פעיל ומוכן לקבל בקשות"}
+
+
+@app.get("/api/products", response_model=ProductSearchResponse)
+def list_products():
+    """מחזיר את כל המוצרים מ-Supabase (לתצוגה בחנות)."""
+    products = _search_products_in_supabase(None, None)
+    return ProductSearchResponse(products=products, count=len(products))
+
+
+@app.get("/api/products/search", response_model=ProductSearchResponse)
+def search_products(
+    q: str | None = Query(
+        default=None,
+        description="חיפוש לפי שם מוצר, מותג או קטגוריה",
+    ),
+    category: str | None = Query(
+        default=None,
+        description="סינון נוסף לפי קטגוריה",
+    ),
+):
+    """
+    Task 2 + 3: חיפוש מוצרים ב-Supabase (RPC search_products).
+    דורש לפחות אחד מהפרמטרים q או category.
+    """
+    search_term = _sanitize_search_param(q)
+    category_filter = _sanitize_search_param(category)
+
+    if not search_term and not category_filter:
+        raise HTTPException(
+            status_code=400,
+            detail="יש להזין מילת חיפוש (q) או קטגוריה (category)",
+        )
+
+    products = _search_products_in_supabase(search_term, category_filter)
+    return ProductSearchResponse(products=products, count=len(products))
 
 
 @app.post("/api/chat", response_model=ChatResponse)
