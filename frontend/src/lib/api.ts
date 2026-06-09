@@ -250,6 +250,126 @@ export async function deleteAdminUser(
   }
 }
 
+export type AdminOrderDto = {
+  order_id: string | number;
+  created_at?: string | null;
+  date?: string | null;
+  customer_name?: string | null;
+  phone?: string | null;
+  product_id?: string | null;
+  quantity?: number | null;
+  status: string;
+};
+
+export function normalizeOrderId(orderId: string | number): string {
+  return String(orderId);
+}
+
+export function isValidAdminOrder(
+  order: AdminOrderDto | null | undefined,
+): order is AdminOrderDto {
+  if (order == null) return false;
+  const { order_id: id } = order;
+  if (typeof id === 'number') return Number.isFinite(id);
+  if (typeof id === 'string') return id.length > 0;
+  return false;
+}
+
+// export async function fetchAdminOrders(
+//   accessToken: string,
+// ): Promise<AdminOrderDto[]> {
+//   const response = await fetch(`${API_URL}/api/admin/orders`, {
+//     headers: {
+//       Authorization: `Bearer ${accessToken}`,
+//     },
+//   });
+
+//   if (!response.ok) {
+//     const detail = await parseApiError(response, 'שגיאה בטעינת הזמנות');
+//     if (response.status === 403) {
+//       throw new Error('אין לך הרשאות גישה לניהול הזמנות');
+//     }
+//     if (response.status === 401) {
+//       throw new Error('יש להתחבר מחדש כדי לצפות בהזמנות');
+//     }
+//     throw new Error(detail);
+//   }
+
+//   const data = await response.json();
+//   if (!Array.isArray(data)) return [];
+//   return data.filter((order): order is AdminOrderDto => isValidAdminOrder(order));
+// }
+
+export async function fetchAdminOrders(
+  accessToken: string,
+): Promise<AdminOrderDto[]> {
+  const response = await fetch(`${API_URL}/api/admin/orders`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const detail = await parseApiError(response, 'שגיאה בטעינת הזמנות');
+    if (response.status === 403) {
+      throw new Error('אין לך הרשאות גישה לניהול הזמנות');
+    }
+    if (response.status === 401) {
+      throw new Error('יש להתחבר מחדש כדי לצפות בהזמנות');
+    }
+    throw new Error(detail);
+  }
+
+  // 1. קריאת המידע הגולמי האמיתי שחזר מהשרת
+  const data = await response.json();
+  console.log('🔍 [API] 1. RAW JSON FROM FETCH:', data);
+
+  // 2. חילוץ המערך (למקרה שהשרת עטף אותו במילה data)
+  const items = Array.isArray(data) ? data : (data?.data || []);
+  console.log('🔍 [API] 2. EXTRACTED ITEMS:', items);
+
+  // אם זה עדיין לא מערך אחרי החילוץ, נחזיר ריק
+  if (!Array.isArray(items)) {
+    console.error('🔍 [API] ERROR: Items is STILL not an array!', items);
+    return [];
+  }
+
+  // 3. סינון לפי החוקים שלך
+  const validItems = items.filter((order): order is AdminOrderDto => isValidAdminOrder(order));
+  console.log('🔍 [API] 3. ITEMS AFTER VALIDATION FILTER:', validItems);
+
+  return validItems;
+}
+
+export async function updateAdminOrderStatus(
+  accessToken: string,
+  orderId: string,
+  status: string,
+): Promise<void> {
+  const response = await fetch(
+    `${API_URL}/api/admin/orders/${orderId}/status`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ status }),
+    },
+  );
+
+  if (!response.ok) {
+    const detail = await parseApiError(response, 'שגיאה בעדכון סטטוס הזמנה');
+    if (response.status === 403) {
+      throw new Error('אין לך הרשאות לעדכן הזמנות');
+    }
+    if (response.status === 401) {
+      throw new Error('יש להתחבר מחדש');
+    }
+    throw new Error(detail);
+  }
+}
+
 export async function addProductToBackendCart(
   userId: string,
   productId: string,

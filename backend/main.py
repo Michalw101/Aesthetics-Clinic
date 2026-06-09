@@ -156,6 +156,18 @@ class AdminUserDeleteResponse(BaseModel):
     message: str
     user_id: str
 
+
+class AdminOrderStatusUpdateRequest(BaseModel):
+    status: str = Field(min_length=1, max_length=50)
+
+
+class AdminOrderStatusUpdateResponse(BaseModel):
+    status: str = "success"
+    message: str
+    order_id: str
+    data: dict[str, Any] | None = None
+
+
 def _sanitize_search_param(value: str | None, *, max_length: int = 120) -> str | None:
     if value is None:
         return None
@@ -480,6 +492,64 @@ def delete_admin_user(user_id: str, _admin=Depends(require_admin)):
     return AdminUserDeleteResponse(
         message="User deleted successfully",
         user_id=user_id,
+    )
+
+
+@app.get("/api/admin/orders")
+def list_admin_orders(_admin=Depends(require_admin)):
+    """
+    Returns all orders via the get_admin_orders RPC.
+    Requires a valid JWT and is_admin = true on the caller's profile.
+    """
+    supabase_admin = get_supabase_admin()
+
+    try:
+        response = supabase_admin.rpc("get_admin_orders", {}).execute()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch admin orders: {str(e)}",
+        ) from e
+
+    return response.data or []
+
+
+@app.put(
+    "/api/admin/orders/{order_id}/status",
+    response_model=AdminOrderStatusUpdateResponse,
+)
+def update_admin_order_status(
+    order_id: str,
+    payload: AdminOrderStatusUpdateRequest,
+    _admin=Depends(require_admin),
+):
+    """
+    Updates an order's status in public.cart_items.
+    Requires a valid JWT and is_admin = true on the caller's profile.
+    """
+    supabase_admin = get_supabase_admin()
+    new_status = payload.status.strip()
+
+    try:
+        response = (
+            supabase_admin.table("cart_items")
+            .update({"status": new_status})
+            .eq("id", order_id)
+            .execute()
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update order status: {str(e)}",
+        ) from e
+
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    return AdminOrderStatusUpdateResponse(
+        message="Order status updated successfully",
+        order_id=order_id,
+        data=response.data[0],
     )
 
 

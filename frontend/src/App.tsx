@@ -12,6 +12,7 @@ import { sendChatToBackend, addSupabaseData } from './lib/api';
 import { useAuth } from './hooks/useAuth';
 import AuthForm from './components/AuthForm';
 import UserManagement from './components/UserManagement';
+import OrderManagement from './components/OrderManagement';
 import { useClinicData } from './hooks/useClinicData';
 import StorePage from './pages/StorePage';
 import { formatDisplayDate } from './lib/format';
@@ -1044,45 +1045,7 @@ function AdminDashboard({
           </div>
         )}
 
-        {tab === 'orders' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-right">
-              <thead className="bg-brand-beige/50 text-xs uppercase tracking-widest text-brand-gold">
-                <tr>
-                  <th className="p-6">לקוחה</th>
-                  <th className="p-6">פריטים</th>
-                  <th className="p-6">סה"כ</th>
-                  <th className="p-6">סטטוס</th>
-                  <th className="p-6">פעולות</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-brand-gold/10">
-                {orders.map((order: any) => (
-                  <tr key={order.id}>
-                    <td className="p-6 font-bold">{order.clientName}</td>
-                    <td className="p-6 text-sm">{order.items.length} פריטים</td>
-                    <td className="p-6 font-bold">₪{order.totalPrice}</td>
-                    <td className="p-6">
-                      <select 
-                        value={order.status}
-                        onChange={(e) => onUpdateOrder(order.id, e.target.value)}
-                        className="bg-brand-beige/30 border border-brand-gold/20 rounded-lg p-1 text-xs"
-                      >
-                        <option value="pending">בטיפול</option>
-                        <option value="shipped">נשלח</option>
-                        <option value="delivered">נמסר</option>
-                        <option value="cancelled">בוטל</option>
-                      </select>
-                    </td>
-                    <td className="p-6">
-                      <button className="p-2 hover:bg-brand-beige rounded-full"><Info size={18} /></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {tab === 'orders' && <OrderManagement />}
 
         {tab === 'products' && (
           <div className="p-8 text-center space-y-6">
