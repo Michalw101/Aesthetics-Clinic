@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-
-const STORAGE_KEY = 'aesthetics_clinic_user';
+import type { User } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 
 export interface AuthUser {
   id: string;
@@ -17,24 +17,88 @@ export interface UserProfile {
   createdAt: string | null;
 }
 
-function loadStoredUser(): AuthUser | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as AuthUser;
-  } catch {
-    return null;
+function mapSupabaseUser(supabaseUser: User): AuthUser {
+  const meta = supabaseUser.user_metadata ?? {};
+  const firstName = (meta.first_name as string | undefined) ?? '';
+  const lastName = (meta.last_name as string | undefined) ?? '';
+  const displayName =
+    [firstName, lastName].filter(Boolean).join(' ').trim() ||
+    supabaseUser.email?.split('@')[0] ||
+    'משתמשת';
+
+  return {
+    id: supabaseUser.id,
+    uid: supabaseUser.id,
+    email: supabaseUser.email ?? '',
+    displayName,
+  };
+}
+
+async function fetchIsAdmin(userId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('is_admin')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Failed to fetch profile:', error);
+    return false;
   }
+
+  return data?.is_admin === true;
 }
 
 export function useAuth() {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
-    setUser(loadStoredUser());
-    setLoading(false);
+    let mounted = true;
+    let profileFetchId = 0;
+
+    const applySession = async (session: { user: User } | null) => {
+      const fetchId = ++profileFetchId;
+
+      if (session?.user) {
+        setUser(mapSupabaseUser(session.user));
+        setAuthError(null);
+        const admin = await fetchIsAdmin(session.user.id);
+        if (!mounted || fetchId !== profileFetchId) return;
+        setIsAdmin(admin);
+      } else {
+        setUser(null);
+        setIsAdmin(false);
+      }
+
+      if (mounted) {
+        setLoading(false);
+      }
+    };
+
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (!mounted) return;
+      if (error) {
+        setAuthError(error.message);
+        setLoading(false);
+        return;
+      }
+      void applySession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      void applySession(session);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const profile: UserProfile | null = user
@@ -47,29 +111,13 @@ export function useAuth() {
       }
     : null;
 
-  const login = async () => {
-    setAuthError(null);
-    const name = window.prompt('שם מלא:');
-    if (!name?.trim()) {
-      setAuthError('התחברות בוטלה');
-      return;
-    }
-    const email = window.prompt('אימייל:')?.trim() ?? '';
-    const id = crypto.randomUUID();
-    const authUser: AuthUser = {
-      id,
-      uid: id,
-      email,
-      displayName: name.trim(),
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(authUser));
-    setUser(authUser);
-  };
-
   const logout = async () => {
-    localStorage.removeItem(STORAGE_KEY);
-    setUser(null);
+    setAuthError(null);
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      setAuthError(error.message);
+    }
   };
 
-  return { user, profile, loading, login, logout, isAdmin: false, authError };
+  return { user, profile, loading, logout, isAdmin, authError };
 }

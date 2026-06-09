@@ -10,6 +10,7 @@ import { Toaster, toast } from 'sonner';
 import { cn } from './lib/utils';
 import { sendChatToBackend, addSupabaseData } from './lib/api';
 import { useAuth } from './hooks/useAuth';
+import AuthForm from './components/AuthForm';
 import { useClinicData } from './hooks/useClinicData';
 import StorePage from './pages/StorePage';
 import { formatDisplayDate } from './lib/format';
@@ -27,7 +28,8 @@ interface UserData {
 }
 
 export default function App() {
-  const { user, profile, loading: authLoading, login, logout, isAdmin, authError } = useAuth();
+  const { user, profile, loading: authLoading, logout, isAdmin, authError } = useAuth();
+  const [showAuthForm, setShowAuthForm] = useState(false);
   const { 
     products, appointments, allScheduledAppointments, blogPosts, orders, 
     reviews, treatments,
@@ -116,7 +118,7 @@ export default function App() {
       toast.error('אנא התחברי כדי לבצע הזמנה', {
         position: 'top-center'
       });
-      login();
+      setShowAuthForm(true);
       return;
     }
     if (cart.length === 0) return;
@@ -156,6 +158,15 @@ export default function App() {
   return (
     <div className="min-h-screen bg-brand-beige text-brand-dark font-sans selection:bg-brand-gold/30" dir="rtl">
       <Toaster position="top-center" richColors />
+      <AnimatePresence>
+        {showAuthForm && (
+          <AuthForm
+            key="auth-form"
+            onClose={() => setShowAuthForm(false)}
+            onSuccess={() => setShowAuthForm(false)}
+          />
+        )}
+      </AnimatePresence>
       {/* Navigation Bar */}
       <nav className="fixed top-0 left-0 right-0 z-40 bg-white/80 backdrop-blur-md border-b border-brand-gold/10 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -211,7 +222,7 @@ export default function App() {
               </div>
             ) : (
               <button 
-                onClick={login}
+                onClick={() => setShowAuthForm(true)}
                 className="flex items-center gap-2 text-sm font-bold text-brand-gold hover:text-brand-gold/80 transition-colors"
               >
                 <LogIn size={18} />
