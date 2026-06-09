@@ -34,35 +34,65 @@ function mapSupabaseUser(supabaseUser: User): AuthUser {
   };
 }
 
+async function fetchIsAdmin(userId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('is_admin')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Failed to fetch profile:', error);
+    return false;
+  }
+
+  return data?.is_admin === true;
+}
+
 export function useAuth() {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
+    let profileFetchId = 0;
+
+    const applySession = async (session: { user: User } | null) => {
+      const fetchId = ++profileFetchId;
+
+      if (session?.user) {
+        setUser(mapSupabaseUser(session.user));
+        setAuthError(null);
+        const admin = await fetchIsAdmin(session.user.id);
+        if (!mounted || fetchId !== profileFetchId) return;
+        setIsAdmin(admin);
+      } else {
+        setUser(null);
+        setIsAdmin(false);
+      }
+
+      if (mounted) {
+        setLoading(false);
+      }
+    };
 
     supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (!mounted) return;
       if (error) {
         setAuthError(error.message);
-      } else if (session?.user) {
-        setUser(mapSupabaseUser(session.user));
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+      void applySession(session);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!mounted) return;
-      if (session?.user) {
-        setUser(mapSupabaseUser(session.user));
-        setAuthError(null);
-      } else {
-        setUser(null);
-      }
-      setLoading(false);
+      void applySession(session);
     });
 
     return () => {
@@ -89,5 +119,5 @@ export function useAuth() {
     }
   };
 
-  return { user, profile, loading, logout, isAdmin: false, authError };
+  return { user, profile, loading, logout, isAdmin, authError };
 }
