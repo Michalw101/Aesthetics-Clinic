@@ -143,7 +143,7 @@ export default function StorePage({
             ודאי שהבקאנד רץ על פורט 8000:
             <br />
             <code className="text-xs bg-white px-2 py-1 rounded">
-              uvicorn main:app --reload --port 8000
+              uvicorn main:app --reload --port 3000
             </code>
           </p>
           <button

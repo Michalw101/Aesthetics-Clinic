@@ -119,7 +119,11 @@ class ProductOut(BaseModel):
 class ProductSearchResponse(BaseModel):
     products: list[ProductOut]
     count: int
-
+    
+class AddToCartRequest(BaseModel):
+    user_id: str      
+    product_id: str  
+    quantity: int = Field(default=1, gt=0) 
 
 def _sanitize_search_param(value: str | None, *, max_length: int = 120) -> str | None:
     if value is None:
@@ -178,6 +182,7 @@ def _search_products_in_supabase(
     try:
         rows = _search_products_direct(search_term, category_filter)
     except Exception as e:
+        print(f"Error querying products from Supabase: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail="שגיאה בגישה לטבלת products ב-Supabase. בדקי SUPABASE_URL ו-SUPABASE_KEY ב-backend/.env",
@@ -307,6 +312,83 @@ async def add_data(user_data: UserInput):
     except Exception as e:
         # טיפול בשגיאות (למשל אם הטבלה לא קיימת או בעיית תקשורת)
         raise HTTPException(status_code=400, detail=f"שגיאה בשמירת הנתונים: {str(e)}")
+
+# ==========================================
+# Add to Cart & View Cart
+# ==========================================
+
+@app.post("/api/cart/add")
+async def add_to_cart(payload: AddToCartRequest):
+    """
+    מוסיף מוצר לעגלה של המשתמש ב-Supabase.
+    אם המוצר כבר קיים בעגלה של אותו משתמש -> מעדכן את הכמות (מוסיף עליה).
+    אם המוצר לא קיים -> יוצר שורה חדשה.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+
+    try:
+        # 1. בדיקה האם המוצר כבר קיים בעגלה של המשתמש הספציפי הזה
+        existing_item = (
+            supabase.table("cart_items")
+            .select("*")
+            .eq("user_id", payload.user_id)
+            .eq("product_id", payload.product_id)
+            .execute()
+        )
+
+        if existing_item.data:
+            # המוצר כבר בעגלה -> נחשב את הכמות החדשה ונעדכן את השורה הקיימת
+            current_qty = existing_item.data[0]["quantity"]
+            new_qty = current_qty + payload.quantity
+            
+            response = (
+                supabase.table("cart_items")
+                .update({"quantity": new_qty})
+                .eq("id", existing_item.data[0]["id"])
+                .execute()
+            )
+            message = "כמות המוצר בעגלה עודכנה בהצלחה"
+        else:
+            # המוצר לא בעגלה -> נוסיף שורה חדשה לגמרי
+            data = {
+                "user_id": payload.user_id,
+                "product_id": payload.product_id,
+                "quantity": payload.quantity
+            }
+            response = supabase.table("cart_items").insert(data).execute()
+            message = "המוצר התווסף לעגלה בהצלחה"
+
+        return {"status": "success", "message": message, "data": response.data}
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"שגיאה בהוספת המוצר לעגלה: {str(e)}")
+
+
+@app.get("/api/cart")
+async def view_cart(user_id: str = Query(..., description="ID של המשתמש לצורך שליפת העגלה")):
+    """
+    שולף את כל הפריטים שנמצאים בעגלה של משתמש ספציפי מתוך Supabase.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+        
+    try:
+        response = supabase.table("cart_items").select("*").eq("user_id", user_id).execute()
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "cart_items": response.data,
+            "count": len(response.data)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"שגיאה בשליפת נתוני העגלה: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    # הרצה על פורט 3000 כברירת מחדל לסביבה זו
+    uvicorn.run(app, host="0.0.0.0", port=3000)
+
 
 if __name__ == "__main__":
     import uvicorn

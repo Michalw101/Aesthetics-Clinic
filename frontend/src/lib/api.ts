@@ -100,21 +100,77 @@ export async function searchProducts(params: {
 export async function addSupabaseData(name: string, content: string) {
   try {
     const response = await fetch(`${API_URL}/add_data`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ name, content }),
     });
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.detail || 'Failed to add data to Supabase via Backend');
+      throw new Error(
+        errorData.detail || "Failed to add data to Supabase via Backend",
+      );
     }
 
     return await response.json();
   } catch (error) {
-    console.error('API Error:', error);
+    console.error("API Error:", error);
     throw error;
   }
 }
+
+export async function fetchCartFromBackend(
+  userId: string,
+): Promise<any[] | null> {
+  try {
+    const response = await fetch(`${API_URL}/api/cart?user_id=${userId}`);
+
+    if (!response.ok) {
+      // אם העגלה עדיין לא קיימת בשרת, נחזיר מערך ריק ולא נכשיל את ה-UI
+      if (response.status === 404) return [];
+
+      const errorData = await response.json();
+      throw new Error(errorData.detail || "Failed to fetch cart");
+    }
+
+    const data = await response.json();
+    // הבאקנד מחזיר אובייקט או מערך, נוודא שאנחנו מחזירים את רשימת הפריטים
+    return Array.isArray(data) ? data : data.items || [];
+  } catch (error) {
+    console.error("Fetch cart API error:", error);
+    return null;
+  }
+}
+
+export async function addProductToBackendCart(
+  userId: string,
+  productId: string,
+  quantity: number = 1,
+): Promise<any> {
+  try {
+    const response = await fetch(`${API_URL}/api/cart/add`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        product_id: productId,
+        quantity: quantity,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || "Failed to add product to cart");
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Add to cart API error:", error);
+    throw error;
+  }
+}
+

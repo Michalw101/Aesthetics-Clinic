@@ -6,7 +6,7 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   // npm run dev: Vite על 3000, בקאנד מקומי בדרך כלל על 8000 (ראו README)
   const devBackend =
-    process.env.VITE_DEV_BACKEND_URL || 'http://127.0.0.1:8000';
+    process.env.VITE_DEV_BACKEND_URL || 'http://127.0.0.1:3000';
 
   return {
     plugins: [react(), tailwindcss()],
