@@ -14,6 +14,7 @@ import AuthForm from './components/AuthForm';
 import { useClinicData } from './hooks/useClinicData';
 import StorePage from './pages/StorePage';
 import { formatDisplayDate } from './lib/format';
+import { useCart } from "./hooks/useCart";
 
 type Page = 'home' | 'consultation' | 'treatments' | 'booking' | 'store' | 'profile' | 'admin' | 'blog';
 
@@ -41,7 +42,7 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('home');
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [hasNewMessage, setHasNewMessage] = useState(true);
-  const [cart, setCart] = useState<any[]>([]);
+  const { cart, addToCart, removeFromCart, clearCart } = useCart(user?.uid);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     { role: 'model', text: 'שלום! אני אסיסטנטית Aesthetics Clinic. איך אוכל לעזור לך היום בטיפוח העור או במידע על הטיפולים שלנו?' }
@@ -105,48 +106,41 @@ export default function App() {
     window.scrollTo(0, 0);
   };
 
-  const addToCart = (product: any) => {
-    setCart(prev => [...prev, product]);
-    toast.success(`הוספת את ${product.name} לסל`, {
-      position: 'bottom-right',
-      duration: 2000,
-    });
-  };
-
   const handlePlaceOrder = async () => {
     if (!user) {
-      toast.error('אנא התחברי כדי לבצע הזמנה', {
-        position: 'top-center'
-      });
+      toast.error("אנא התחברי כדי לבצע הזמנה", { position: "top-center" });
       setShowAuthForm(true);
       return;
     }
     if (cart.length === 0) return;
 
     const totalPrice = cart.reduce((sum, item) => {
-      const price = typeof item.price === 'string' 
-        ? parseFloat(item.price.replace('₪', '')) 
-        : item.price;
-      return sum + price;
+      const price =
+        typeof item.price === "string"
+          ? parseFloat(item.price.replace("₪", ""))
+          : item.price;
+      const qty = item.quantity || 1; // לקיחת הכמות בחשבון
+      return sum + price * qty;
     }, 0);
 
     try {
       await placeOrder({
         clientUid: user.uid,
-        clientName: profile?.name || 'User',
+        clientName: profile?.name || "User",
         items: cart,
-        totalPrice
+        totalPrice,
       });
-      setCart([]);
-      toast.success('ההזמנה בוצעה בהצלחה! תוכלי לראות אותה בפרופיל שלך', {
-        position: 'top-center'
+
+      clearCart();
+
+      toast.success("ההזמנה בוצעה בהצלחה! תוכלי לראות אותה בפרופיל שלך", {
+        position: "top-center",
       });
-      navigateTo('profile');
+      navigateTo("profile");
     } catch (error) {
-      toast.error('חלה שגיאה בביצוע ההזמנה. אנא נסי שוב.');
+      toast.error("חלה שגיאה בביצוע ההזמנה. אנא נסי שוב.");
     }
   };
-
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-brand-beige">
@@ -199,8 +193,11 @@ export default function App() {
                 className="relative p-2 text-brand-dark hover:text-brand-gold transition-colors"
               >
                 <ShoppingBag size={22} />
-                <span className="absolute -top-1 -right-1 bg-brand-gold text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-sm">
-                  {cart.length}
+                 <span className="absolute -top-1 -right-1 bg-brand-gold text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-sm">
+                  {cart.reduce(
+                    (total, item) => total + (item.quantity || 1),
+                    0,
+                  )}
                 </span>
               </button>
             )}
@@ -351,7 +348,7 @@ export default function App() {
       <AnimatePresence>
         {isCartOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -359,41 +356,83 @@ export default function App() {
             >
               <div className="p-6 border-b border-brand-gold/10 flex items-center justify-between bg-brand-beige/30">
                 <h3 className="text-xl serif font-semibold">סל הקניות שלך</h3>
-                <button onClick={() => setIsCartOpen(false)} className="p-2 hover:bg-brand-gold/10 rounded-full transition-colors">
+                <button
+                  onClick={() => setIsCartOpen(false)}
+                  className="p-2 hover:bg-brand-gold/10 rounded-full transition-colors"
+                >
                   <X size={20} />
                 </button>
               </div>
-              
+
               <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                {cart.map((item, idx) => (
-                  <div key={idx} className="flex items-center gap-4 p-3 bg-brand-beige/20 rounded-2xl border border-brand-gold/5">
-                    <img src={item.img || item.imageUrl || 'https://picsum.photos/seed/cosmetics/100/100'} alt={item.name} className="w-16 h-16 rounded-xl object-cover" referrerPolicy="no-referrer" />
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-sm">{item.name}</h4>
-                      <p className="text-xs text-brand-dark/60">{item.brand}</p>
-                      <p className="text-brand-gold font-bold mt-1">{typeof item.price === 'number' ? `₪${item.price}` : item.price}</p>
-                    </div>
-                    <button 
-                      onClick={() => setCart(prev => prev.filter((_, i) => i !== idx))}
-                      className="text-red-400 hover:text-red-600 p-2"
+                {cart.map((item, idx) => {
+                  // חילוץ המחיר כמספר (מטפל גם בסטרינג עם ₪ וגם במספר נקי)
+                  const itemPrice =
+                    typeof item.price === "string"
+                      ? parseFloat(item.price.replace("₪", ""))
+                      : item.price;
+
+                  return (
+                    <div
+                      key={item.id || idx}
+                      className="flex items-center gap-4 p-3 bg-brand-beige/20 rounded-2xl border border-brand-gold/5"
                     >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                ))}
+                      <img
+                        src={
+                          item.img ||
+                          item.imageUrl ||
+                          "https://picsum.photos/seed/cosmetics/100/100"
+                        }
+                        alt={item.name}
+                        className="w-16 h-16 rounded-xl object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-sm">{item.name}</h4>
+                        <p className="text-xs text-brand-dark/60">
+                          {item.brand}
+                        </p>
+
+                        {/* תצוגת כמות ומחיר פריט */}
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs bg-brand-gold/10 text-brand-gold px-2 py-0.5 rounded-full font-bold">
+                            כמות: {item.quantity || 1}
+                          </span>
+                          <p className="text-brand-gold font-bold text-sm">
+                            ₪{(itemPrice * (item.quantity || 1)).toFixed(0)}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => removeFromCart(idx)}
+                        className="text-red-400 hover:text-red-600 p-2"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="p-6 bg-brand-beige/30 border-t border-brand-gold/10 space-y-4">
                 <div className="flex justify-between items-center text-lg font-bold">
                   <span>סה"כ לתשלום:</span>
                   <span className="text-brand-gold">
-                    ₪{cart.reduce((sum, item) => {
-                      const price = typeof item.price === 'string' ? parseFloat(item.price.replace('₪', '')) : item.price;
-                      return sum + price;
-                    }, 0)}
+                    ₪
+                    {cart
+                      .reduce((sum, item) => {
+                        const price =
+                          typeof item.price === "string"
+                            ? parseFloat(item.price.replace("₪", ""))
+                            : item.price;
+                        // מכפילים את מחיר הפריט בכמות שלו (אם אין כמות, ברירת המחדל היא 1)
+                        const qty = item.quantity || 1;
+                        return sum + price * qty;
+                      }, 0)
+                      .toFixed(0)}
                   </span>
                 </div>
-                <button 
+                <button
                   onClick={() => {
                     setIsCartOpen(false);
                     handlePlaceOrder();
