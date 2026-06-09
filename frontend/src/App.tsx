@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Send, User, Sparkles, Calendar, ShoppingBag, Info, Menu, X, 
   MessageCircle, ArrowLeft, Star, Clock, MapPin, Phone, Instagram, Facebook,
-  LogIn, UserPlus, LogOut, CheckCircle2, Shield, Package, Users, Trash2, Edit3
+  LogIn, UserPlus, LogOut, CheckCircle2, Package, Users, Trash2, Edit3
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Toaster, toast } from 'sonner';
@@ -11,6 +11,7 @@ import { cn } from './lib/utils';
 import { sendChatToBackend, addSupabaseData } from './lib/api';
 import { useAuth } from './hooks/useAuth';
 import AuthForm from './components/AuthForm';
+import UserManagement from './components/UserManagement';
 import { useClinicData } from './hooks/useClinicData';
 import StorePage from './pages/StorePage';
 import { formatDisplayDate } from './lib/format';
@@ -179,8 +180,11 @@ export default function App() {
               <button onClick={() => navigateTo('blog')} className={cn("hover:text-brand-gold transition-colors", currentPage === 'blog' && "text-brand-gold")}>בלוג</button>
               <button onClick={() => navigateTo('consultation')} className={cn("hover:text-brand-gold transition-colors", currentPage === 'consultation' && "text-brand-gold")}>ייעוץ אישי</button>
               {isAdmin && (
-                <button onClick={() => navigateTo('admin')} className={cn("flex items-center gap-1 text-brand-gold font-bold", currentPage === 'admin' && "underline underline-offset-4")}>
-                  <Shield size={14} /> ניהול
+                <button
+                  onClick={() => navigateTo('admin')}
+                  className={cn("hover:text-brand-gold transition-colors", currentPage === 'admin' && "text-brand-gold")}
+                >
+                  אזור ניהול
                 </button>
               )}
             </div>
@@ -972,7 +976,7 @@ function AdminDashboard({
   onUpdateAppointment, onUpdateOrder, onAddBlogPost, onDeleteBlogPost,
   onUpdateReview, onDeleteReview, onAddTreatment, onDeleteTreatment
 }: any) {
-  const [tab, setTab] = useState<'appointments' | 'orders' | 'products' | 'blog' | 'reviews' | 'treatments'>('appointments');
+  const [tab, setTab] = useState<'appointments' | 'orders' | 'products' | 'blog' | 'reviews' | 'treatments' | 'users'>('appointments');
   const [newPost, setNewPost] = useState({ title: '', content: '', author: 'הקוסמטיקאית שלך' });
   const [newTreatment, setNewTreatment] = useState({ name: '', description: '', price: '' });
 
@@ -999,6 +1003,7 @@ function AdminDashboard({
           <button onClick={() => setTab('blog')} className={cn("px-6 py-2 rounded-full text-sm font-bold transition-all", tab === 'blog' ? "bg-brand-gold text-white" : "bg-white text-brand-dark")}>בלוג</button>
           <button onClick={() => setTab('reviews')} className={cn("px-6 py-2 rounded-full text-sm font-bold transition-all", tab === 'reviews' ? "bg-brand-gold text-white" : "bg-white text-brand-dark")}>ביקורות</button>
           <button onClick={() => setTab('treatments')} className={cn("px-6 py-2 rounded-full text-sm font-bold transition-all", tab === 'treatments' ? "bg-brand-gold text-white" : "bg-white text-brand-dark")}>טיפולים</button>
+          <button onClick={() => setTab('users')} className={cn("px-6 py-2 rounded-full text-sm font-bold transition-all", tab === 'users' ? "bg-brand-gold text-white" : "bg-white text-brand-dark")}>משתמשים</button>
         </div>
       </div>
 
@@ -1191,6 +1196,8 @@ function AdminDashboard({
             </table>
           </div>
         )}
+
+        {tab === 'users' && <UserManagement />}
 
         {tab === 'treatments' && (
           <div className="p-8 space-y-8">

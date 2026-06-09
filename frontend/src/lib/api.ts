@@ -144,6 +144,112 @@ export async function fetchCartFromBackend(
   }
 }
 
+export type AdminUserDto = {
+  id: string;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  is_admin: boolean;
+  last_sign_in_at: string | null;
+};
+
+export async function fetchAdminUsers(accessToken: string): Promise<AdminUserDto[]> {
+  const response = await fetch(`${API_URL}/api/admin/users`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    let detail = 'שגיאה בטעינת משתמשים';
+    try {
+      const errorData = await response.json();
+      detail = typeof errorData.detail === 'string' ? errorData.detail : detail;
+    } catch {
+      /* ignore */
+    }
+
+    if (response.status === 403) {
+      throw new Error('אין לך הרשאות גישה לניהול משתמשים');
+    }
+    if (response.status === 401) {
+      throw new Error('יש להתחבר מחדש כדי לצפות במשתמשים');
+    }
+    throw new Error(detail);
+  }
+
+  return (await response.json()) as AdminUserDto[];
+}
+
+export type AdminUserUpdatePayload = {
+  first_name: string;
+  last_name: string;
+  phone: string;
+  is_admin: boolean;
+};
+
+async function parseApiError(
+  response: Response,
+  fallback: string,
+): Promise<string> {
+  try {
+    const errorData = await response.json();
+    return typeof errorData.detail === 'string' ? errorData.detail : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function updateAdminUser(
+  accessToken: string,
+  userId: string,
+  payload: AdminUserUpdatePayload,
+): Promise<void> {
+  const response = await fetch(`${API_URL}/api/admin/users/${userId}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const detail = await parseApiError(response, 'שגיאה בעדכון משתמש');
+    if (response.status === 403) {
+      throw new Error('אין לך הרשאות לעדכן משתמשים');
+    }
+    if (response.status === 401) {
+      throw new Error('יש להתחבר מחדש');
+    }
+    throw new Error(detail);
+  }
+}
+
+export async function deleteAdminUser(
+  accessToken: string,
+  userId: string,
+): Promise<void> {
+  const response = await fetch(`${API_URL}/api/admin/users/${userId}`, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const detail = await parseApiError(response, 'שגיאה במחיקת משתמש');
+    if (response.status === 403) {
+      throw new Error('אין לך הרשאות למחוק משתמשים');
+    }
+    if (response.status === 401) {
+      throw new Error('יש להתחבר מחדש');
+    }
+    throw new Error(detail);
+  }
+}
+
 export async function addProductToBackendCart(
   userId: string,
   productId: string,
