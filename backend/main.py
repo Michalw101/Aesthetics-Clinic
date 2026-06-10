@@ -384,6 +384,49 @@ async def view_cart(user_id: str = Query(..., description="ID של המשתמש 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"שגיאה בשליפת נתוני העגלה: {str(e)}")
 
+# ==========================================
+# Profile Management
+# ==========================================
+
+class ProfileUpdateRequest(BaseModel):
+    user_id: str
+    first_name: str
+    last_name: str
+    phone: str
+
+@app.put("/api/profile/update")
+async def update_profile(payload: ProfileUpdateRequest):
+    """
+    מקבל את הפרטים המעודכנים מהמשתמש ושומר אותם בטבלת profiles ב-Supabase.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+    
+    try:
+        # אלו הנתונים שנרצה לעדכן בטבלה
+        data_to_update = {
+            "first_name": payload.first_name.strip(),
+            "last_name": payload.last_name.strip(),
+            "phone": payload.phone.strip()
+        }
+        
+        # מבצעים Update לטבלת profiles במקום בו ה-id תואם למשתמש הנוכחי
+        response = (
+            supabase.table("profiles")
+            .update(data_to_update)
+            .eq("id", payload.user_id)
+            .execute()
+        )
+        
+        return {
+            "status": "success", 
+            "message": "הפרופיל עודכן בהצלחה", 
+            "data": response.data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"שגיאה בעדכון הפרופיל: {str(e)}")        
+
 if __name__ == "__main__":
     import uvicorn
     # הרצה על פורט 3000 כברירת מחדל לסביבה זו
