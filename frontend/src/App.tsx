@@ -16,6 +16,7 @@ import StorePage from './pages/StorePage';
 import { formatDisplayDate } from './lib/format';
 import { useCart } from "./hooks/useCart";
 import { supabase } from './lib/supabase';
+import { sendCheckoutToBackend, fetchUserOrdersFromBackend } from './lib/api'; 
 
 type Page = 'home' | 'consultation' | 'treatments' | 'booking' | 'store' | 'profile' | 'admin' | 'blog';
 
@@ -107,41 +108,63 @@ export default function App() {
     window.scrollTo(0, 0);
   };
 
-  const handlePlaceOrder = async () => {
-    if (!user) {
-      toast.error("אנא התחברי כדי לבצע הזמנה", { position: "top-center" });
-      setShowAuthForm(true);
-      return;
-    }
-    if (cart.length === 0) return;
+ const handlePlaceOrder = async () => {
+  // 1. בדיקת התחברות 
+  if (!user) {
+    toast.error("אנא התחברי כדי לבצע הזמנה", { position: "top-center" });
+    setShowAuthForm(true);
+    return;
+  }
+  if (cart.length === 0) return;
 
-    const totalPrice = cart.reduce((sum, item) => {
-      const price =
-        typeof item.price === "string"
-          ? parseFloat(item.price.replace("₪", ""))
-          : item.price;
-      const qty = item.quantity || 1; // לקיחת הכמות בחשבון
-      return sum + price * qty;
-    }, 0);
+  // 2. חישוב הסכום הכולל)
+  const totalPrice = cart.reduce((sum, item) => {
+    const price =
+      typeof item.price === "string"
+        ? parseFloat(item.price.replace("₪", ""))
+        : item.price;
+    const qty = item.quantity || 1;
+    return sum + price * qty;
+  }, 0);
 
-    try {
-      await placeOrder({
-        clientUid: user.uid,
-        clientName: profile?.name || "User",
-        items: cart,
-        totalPrice,
-      });
-
-      clearCart();
-
-      toast.success("ההזמנה בוצעה בהצלחה! תוכלי לראות אותה בפרופיל שלך", {
-        position: "top-center",
-      });
-      navigateTo("profile");
-    } catch (error) {
-      toast.error("חלה שגיאה בביצוע ההזמנה. אנא נסי שוב.");
-    }
+  // 3. הכנת הנתונים החדשים לטובת ה-Checkout המאובטח בבאקנד
+  const checkoutParams = {
+    userId: user.uid, // משתמש ב-UID של המשתמש המחובר שלך
+    clientName: profile?.name || "User", // משתמש בשם מהפרופיל שלך
+    items: cart.map(item => ({
+      product_id: item.product_id || item.id,
+      name: item.name,
+      quantity: item.quantity || 1,
+      price: typeof item.price === "string" ? parseFloat(item.price.replace("₪", "")) : item.price,
+      img: item.img || item.imageUrl || item.image || "",
+    })),
+    totalPrice: totalPrice,
+    paymentMethod: "credit_card",
+    cardTokenOrRaw: "tok_visa_12345_encrypted_simulation" // הנתון הרגיש שיעבור הצפנה ב-FastAPI
   };
+
+  try {
+    toast.loading("מבצע תשלום מאובטח...", { id: "checkout", position: "top-center" });
+
+    const result = await sendCheckoutToBackend(checkoutParams);
+
+    if (result.status === "success") {
+      clearCart();
+      
+      toast.success("ההזמנה בוצעה בהצלחה! התשלום אושר ומאובטח בהצפנה.", {
+        id: "checkout",
+        position: "top-center",
+        duration: 4000
+      });
+      
+      navigateTo("profile");
+    }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "חלה שגיאה בביצוע ההזמנה. אנא נסי שוב.";
+    toast.error(msg, { id: "checkout", position: "top-center" });
+  }
+};
+
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-brand-beige">
@@ -1078,36 +1101,64 @@ function ProfilePage({ profile, appointments, orders, onCancelAppointment }: { p
         </div>
 
         <div className="space-y-6">
-          <h3 className="text-2xl serif font-semibold flex items-center gap-2">
-            <ShoppingBag size={20} className="text-brand-gold" /> ההזמנות שלי
-          </h3>
-          <div className="space-y-4">
-            {orders.length === 0 ? (
-              <p className="text-brand-dark/40 italic">אין הזמנות קודמות</p>
-            ) : (
-              orders.map((order) => (
-                <div key={order.id} className="bg-white p-6 rounded-2xl border border-brand-gold/10 space-y-4">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h4 className="font-bold">הזמנה #{order.id.slice(-6)}</h4>
-                      <p className="text-xs text-brand-dark/60">סה"כ: ₪{order.totalPrice}</p>
-                    </div>
-                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-brand-gold/10 text-brand-gold rounded-full">
-                      {order.status === 'pending' ? 'בטיפול' : order.status}
+  <h3 className="text-2xl serif font-semibold flex items-center gap-2">
+    <ShoppingBag size={20} className="text-brand-gold" /> ההזמנות שלי
+  </h3>
+  <div className="space-y-4">
+    {orders.length === 0 ? (
+      <p className="text-brand-dark/40 italic">אין הזמנות קודמות</p>
+    ) : (
+      orders.map((order) => (
+        <div key={order.id} className="bg-white p-6 rounded-2xl border border-brand-gold/10 space-y-4">
+          <div className="flex justify-between items-start">
+            <div>
+              <h4 className="font-bold">הזמנה #{order.id.slice(-6)}</h4>
+              <p className="text-xs text-brand-dark/60">סה"כ: ₪{order.totalPrice}</p>
+              
+              {/* 🌟 הוספת תאריך ההזמנה */}
+              {order.createdAt && (
+                <p className="text-[11px] text-brand-dark/40 mt-1">
+                  תאריך: {new Date(order.createdAt).toLocaleDateString('he-IL')} בשעה {new Date(order.createdAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              )}
+            </div>
+            <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-green-100 text-green-700 rounded-full">
+              {order.status === 'pending' ? 'בטיפול' : order.status === 'paid' ? 'שולם' : order.status}
+            </span>
+          </div>
+
+          {/* תצוגת תמונות המוצרים */}
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {order.items && order.items.map((item: any, i: number) => {
+              // 🌟 מוודא שהקוד תופס גם img וגם imageUrl למניעת באגים
+              const itemImage = item.img || item.imageUrl || item.image || "https://via.placeholder.com/150";
+              
+              return (
+                <div key={i} className="group relative w-12 h-12 rounded-lg bg-brand-beige overflow-hidden flex-shrink-0 border border-brand-gold/5">
+                  <img 
+                    src={itemImage} 
+                    alt={item.name}
+                    className="w-full h-full object-cover transition-transform group-hover:scale-110" 
+                    onError={(e) => {
+                      // אם הלינק לתמונה שבור, נשים תמונת פלבאק
+                      (e.target as HTMLImageElement).src = "https://via.placeholder.com/150";
+                    }}
+                  />
+                  {/* בבלון קטן כשעומדים על התמונה - יראו את כמות הפריטים מהמוצר הזה */}
+                  {item.quantity > 1 && (
+                    <span className="absolute bottom-0 right-0 bg-brand-gold text-white text-[9px] font-bold px-1 rounded-tl">
+                      x{item.quantity}
                     </span>
-                  </div>
-                  <div className="flex gap-2 overflow-x-auto pb-2">
-                    {order.items.map((item: any, i: number) => (
-                      <div key={i} className="w-12 h-12 rounded-lg bg-brand-beige overflow-hidden flex-shrink-0">
-                        <img src={item.img} className="w-full h-full object-cover" />
-                      </div>
-                    ))}
-                  </div>
+                  )}
                 </div>
-              ))
-            )}
+              );
+            })}
           </div>
         </div>
+      ))
+    )}
+  </div>
+</div>
       </div>
     </motion.div>
   );

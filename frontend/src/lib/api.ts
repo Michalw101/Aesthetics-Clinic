@@ -174,3 +174,75 @@ export async function addProductToBackendCart(
   }
 }
 
+export type CheckoutItemDto = {
+  product_id: string;
+  name: string;
+  quantity: number;
+  price: number;
+};
+
+export type CheckoutParams = {
+  userId: string;
+  clientName: string;
+  items: CheckoutItemDto[];
+  totalPrice: number;
+  paymentMethod?: string;
+  cardTokenOrRaw: string;
+};
+
+export type CheckoutResponse = {
+  status: string;
+  message: string;
+  order_id: string | null;
+};
+
+export async function sendCheckoutToBackend(params: CheckoutParams): Promise<CheckoutResponse> {
+  try {
+    const response = await fetch(`${API_URL}/api/checkout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: params.userId,
+        client_name: params.clientName,
+        items: params.items,
+        total_price: params.totalPrice,
+        payment_method: params.paymentMethod || 'credit_card',
+        card_token_or_raw: params.cardTokenOrRaw,
+      }),
+    });
+
+    if (!response.ok) {
+      let detail = 'שגיאה בתהליך התשלום וההזמנה';
+      try {
+        const errorData = await response.json();
+        detail = typeof errorData.detail === 'string' ? errorData.detail : detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail);
+    }
+
+    return (await response.json()) as CheckoutResponse;
+  } catch (error) {
+    console.error("Checkout API error:", error);
+    throw error;
+  }
+}
+
+export async function fetchUserOrdersFromBackend(userId: string): Promise<any[]> {
+  try {
+    const response = await fetch(`${API_URL}/api/orders?user_id=${userId}`);
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || "נכשל בטעינת הזמנות");
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Fetch orders API error:", error);
+    return []; // מחזירים מערך ריק כדי לא לשבור את ה-UI בשגיאה
+  }
+}
