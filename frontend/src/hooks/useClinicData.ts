@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { fetchUserOrdersFromBackend } from '../lib/api';
 
 /** נתוני קליניקה בזיכרון (ללא Firebase). שמירה ל-Supabase רק דרך הבקאנד בצ'אט / טופס ייעוץ. */
 export function useClinicData(userId: string | undefined) {
@@ -94,6 +95,34 @@ export function useClinicData(userId: string | undefined) {
     ]);
   };
 
+  useEffect(() => {
+    if (!userId) {
+      setOrders([]); // אם אין משתמש מחובר, ננקה את ההזמנות
+      return;
+    }
+
+    async function loadOrders() {
+      // קוראים לשרת ומביאים את ההזמנות מ-Supabase
+      const dbOrders = await fetchUserOrdersFromBackend(userId!);
+      
+      // הופכים את השמות מהבסיס נתונים (snake_case) לשמות שהפרונט מכיר (camelCase)
+      const mappedOrders = dbOrders.map((order: any) => ({
+        id: order.id,
+        clientUid: order.client_uid,
+        clientName: order.client_name,
+        items: order.items || [],
+        totalPrice: order.total_price ?? order.totalPrice,
+        status: order.status || 'paid',
+        createdAt: order.created_at || order.createdAt
+      }));
+
+      // מעדכנים את ה-State כדי שהמסך יתרענן ויציג אותן
+      setOrders(mappedOrders);
+    }
+
+    loadOrders();
+  }, [userId]); // רץ אוטומטית בכל פעם שהמשתמש מתחבר או משתנה
+
   const updateReviewStatus = async (id: string, status: string) => {
     setReviews((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
   };
@@ -113,8 +142,7 @@ export function useClinicData(userId: string | undefined) {
   const userAppointments = userId
     ? appointments.filter((a) => a.clientUid === userId)
     : [];
-  const userOrders = userId ? orders.filter((o) => o.clientUid === userId) : [];
-
+  const userOrders = orders;
   return {
     products,
     appointments: userAppointments,
