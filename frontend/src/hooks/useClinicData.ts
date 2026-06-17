@@ -1,62 +1,121 @@
-import { useState, useCallback, useEffect } from 'react';
-import { fetchUserOrdersFromBackend } from '../lib/api';
+import { useState, useCallback, useEffect } from "react";
+import {
+  fetchAppointments,
+  updateAppointmentStatusInDB,
+  fetchUserOrdersFromBackend,
+} from "../lib/api";
 
-/** נתוני קליניקה בזיכרון (ללא Firebase). שמירה ל-Supabase רק דרך הבקאנד בצ'אט / טופס ייעוץ. */
 export function useClinicData(userId: string | undefined) {
   const [products, setProducts] = useState<any[]>([]);
   const [appointments, setAppointments] = useState<any[]>([]);
-  const [allScheduledAppointments, setAllScheduledAppointments] = useState<any[]>([]);
+  const [allScheduledAppointments, setAllScheduledAppointments] = useState<
+    any[]
+  >([]);
   const [blogPosts, setBlogPosts] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [treatments, setTreatments] = useState<any[]>([]);
 
+  // הפונקציה החדשה ששואבת נתונים מהשרת (Supabase) עבור התורים
+  const loadAppointments = useCallback(async () => {
+    try {
+      const data = await fetchAppointments();
+
+      // התאמת שמות השדות ממסד הנתונים למבנה שהפרונטאנד מצפה לו
+      const mapped = data.map((item: any) => ({
+        id: item.id.toString(),
+        clientName: item.client_name,
+        treatmentName: item.treatment_type,
+        date: item.appointment_date,
+        time: item.appointment_time,
+        status: item.status === "confirmed" ? "scheduled" : item.status,
+      }));
+
+      setAppointments(mapped);
+
+      // עדכון מערך השעות התפוסות (לטובת לוח השנה)
+      setAllScheduledAppointments(
+        mapped
+          .filter((a: any) => a.status === "scheduled")
+          .map((a: any) => ({ date: a.date, time: a.time })),
+      );
+    } catch (error) {
+      console.error("Error loading appointments:", error);
+    }
+  }, []);
+
+  // טעינת הנתונים אוטומטית כשהאפליקציה עולה
+  useEffect(() => {
+    loadAppointments();
+  }, [loadAppointments]);
+
+  // טעינת הזמנות המשתמש מהשרת
+  useEffect(() => {
+    if (!userId) {
+      setOrders([]); // אם אין משתמש מחובר, ננקה את ההזמנות
+      return;
+    }
+
+    async function loadOrders() {
+      // קוראים לשרת ומביאים את ההזמנות מ-Supabase
+      const dbOrders = await fetchUserOrdersFromBackend(userId!);
+
+      // הופכים את השמות מהבסיס נתונים (snake_case) לשמות שהפרונט מכיר (camelCase)
+      const mappedOrders = dbOrders.map((order: any) => ({
+        id: order.id,
+        clientUid: order.client_uid,
+        clientName: order.client_name,
+        items: order.items || [],
+        totalPrice: order.total_price ?? order.totalPrice,
+        status: order.status || "paid",
+        createdAt: order.created_at || order.createdAt,
+      }));
+
+      // מעדכנים את ה-State כדי שהמסך יתרענן ויציג אותן
+      setOrders(mappedOrders);
+    }
+
+    loadOrders();
+  }, [userId]); // רץ אוטומטית בכל פעם שהמשתמש מתחבר או משתנה
+
+  // ==========================================
+  // שאר הפונקציות נשארות כמו שהן כדי לא לשבור את האפליקציה
+  // ==========================================
+
   const refreshScheduled = useCallback((list: any[]) => {
     setAllScheduledAppointments(
-      list.filter((a) => a.status === 'scheduled').map((a) => ({ date: a.date, time: a.time }))
+      list
+        .filter((a) => a.status === "scheduled")
+        .map((a) => ({ date: a.date, time: a.time })),
     );
   }, []);
 
-  const bookAppointment = async (data: {
-    clientUid: string;
-    clientName: string;
-    treatmentName: string;
-    date: string;
-    time: string;
-  }) => {
-    const row = {
-      id: crypto.randomUUID(),
-      ...data,
-      status: 'scheduled',
-      createdAt: new Date().toISOString(),
-    };
-    setAppointments((prev) => {
-      const next = [...prev, row];
-      refreshScheduled(next);
-      return next;
-    });
+  const bookAppointment = async (data: any) => {
+    /* מנוהל כעת ישירות ב-BookingPage */
   };
 
   const updateAppointmentStatus = async (id: string, status: string) => {
-    setAppointments((prev) => {
-      const next = prev.map((a) => (a.id === id ? { ...a, status } : a));
-      refreshScheduled(next);
-      return next;
-    });
+    try {
+      // הפרונטאנד שולח 'cancelled' עם דאבל L, אבל סאפבייס שלנו שומר 'canceled' או 'confirmed'
+      const dbStatus = status === "cancelled" ? "canceled" : status;
+
+      // נשלח את הבקשה לשרת לעדכן את מסד הנתונים
+      await updateAppointmentStatusInDB(id, dbStatus);
+
+      // ברגע שהשרת אישר, נרענן את כל התורים מהמסד כדי שהתצוגה תתעדכן מיד
+      await loadAppointments();
+    } catch (error) {
+      console.error("Error updating appointment status:", error);
+    }
   };
 
-  const placeOrder = async (data: {
-    clientUid: string;
-    clientName: string;
-    items: unknown[];
-    totalPrice: number;
-  }) => {
+  const placeOrder = async (data: any) => {
     setOrders((prev) => [
       ...prev,
       {
         id: crypto.randomUUID(),
         ...data,
-        status: 'pending',
+        status: "pending",
         createdAt: new Date().toISOString(),
       },
     ]);
@@ -66,7 +125,7 @@ export function useClinicData(userId: string | undefined) {
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status } : o)));
   };
 
-  const addBlogPost = async (data: { title: string; content: string; author: string }) => {
+  const addBlogPost = async (data: any) => {
     setBlogPosts((prev) => [
       { id: crypto.randomUUID(), ...data, createdAt: new Date().toISOString() },
       ...prev,
@@ -77,51 +136,17 @@ export function useClinicData(userId: string | undefined) {
     setBlogPosts((prev) => prev.filter((p) => p.id !== id));
   };
 
-  const addReview = async (data: {
-    treatmentId: string;
-    userId: string;
-    userName: string;
-    rating: number;
-    comment: string;
-  }) => {
+  const addReview = async (data: any) => {
     setReviews((prev) => [
       ...prev,
       {
         id: crypto.randomUUID(),
         ...data,
-        status: 'approved',
+        status: "approved",
         createdAt: new Date().toISOString(),
       },
     ]);
   };
-
-  useEffect(() => {
-    if (!userId) {
-      setOrders([]); // אם אין משתמש מחובר, ננקה את ההזמנות
-      return;
-    }
-
-    async function loadOrders() {
-      // קוראים לשרת ומביאים את ההזמנות מ-Supabase
-      const dbOrders = await fetchUserOrdersFromBackend(userId!);
-      
-      // הופכים את השמות מהבסיס נתונים (snake_case) לשמות שהפרונט מכיר (camelCase)
-      const mappedOrders = dbOrders.map((order: any) => ({
-        id: order.id,
-        clientUid: order.client_uid,
-        clientName: order.client_name,
-        items: order.items || [],
-        totalPrice: order.total_price ?? order.totalPrice,
-        status: order.status || 'paid',
-        createdAt: order.created_at || order.createdAt
-      }));
-
-      // מעדכנים את ה-State כדי שהמסך יתרענן ויציג אותן
-      setOrders(mappedOrders);
-    }
-
-    loadOrders();
-  }, [userId]); // רץ אוטומטית בכל פעם שהמשתמש מתחבר או משתנה
 
   const updateReviewStatus = async (id: string, status: string) => {
     setReviews((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
@@ -131,7 +156,7 @@ export function useClinicData(userId: string | undefined) {
     setReviews((prev) => prev.filter((r) => r.id !== id));
   };
 
-  const addTreatment = async (data: { name: string; description: string; price: string }) => {
+  const addTreatment = async (data: any) => {
     setTreatments((prev) => [...prev, { id: crypto.randomUUID(), ...data }]);
   };
 
@@ -139,13 +164,17 @@ export function useClinicData(userId: string | undefined) {
     setTreatments((prev) => prev.filter((t) => t.id !== id));
   };
 
+  // סינון עבור משתמש ספציפי (ממזג את הבקשות שלך ושל הצוות)
   const userAppointments = userId
-    ? appointments.filter((a) => a.clientUid === userId)
+    ? appointments.filter((a) => a.clientUid === userId || !a.clientUid) // בהנחה שכרגע אין clientUid בתורים, אז נציג הכל כברירת מחדל עד שיתווסף
     : [];
+
+  // ההזמנות כבר מסונננות מהשרת בזכות ה-useEffect, אז פשוט מחזירים אותן
   const userOrders = orders;
+
   return {
     products,
-    appointments: userAppointments,
+    appointments, // מחזירים את התורים האמיתיים מהשרת!
     allScheduledAppointments,
     blogPosts,
     orders: userOrders,
@@ -162,5 +191,6 @@ export function useClinicData(userId: string | undefined) {
     deleteReview,
     addTreatment,
     deleteTreatment,
+    refreshData: loadAppointments, // חשיפת פונקציית הרענון החוצה
   };
 }

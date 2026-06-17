@@ -97,7 +97,7 @@ else:
 cipher_suite = Fernet(ENCRYPTION_KEY)
 
 
-# הגדרת מבנה הנתונים הצפוי בבקשה (Schema)
+# סכמות נתונים קיימות
 class UserInput(BaseModel):
     name: str
     content: str
@@ -106,6 +106,8 @@ class UserInput(BaseModel):
 class ChatPart(BaseModel):
     text: str
 
+class AppointmentStatusUpdate(BaseModel):
+    status: str
 
 class ChatTurn(BaseModel):
     role: Literal["user", "model"]
@@ -113,7 +115,6 @@ class ChatTurn(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """היסטוריית צ'אט בפורמט Gemini: role + parts עם טקסט."""
     messages: list[ChatTurn] = Field(min_length=1)
 
 
@@ -121,6 +122,20 @@ class ChatResponse(BaseModel):
     reply: str
 
 
+# =========================================================
+# סכמות נתונים חדשות עבור מערכת התורים (Pydantic Models) - של ציפורה
+# =========================================================
+class AppointmentCreate(BaseModel):
+    client_name: str
+    phone: str
+    treatment_type: str
+    appointment_date: str  # פורמט צפוי: YYYY-MM-DD
+    appointment_time: str  # פורמט צפוי: HH:MM
+
+
+# =========================================================
+# סכמות מוצרים וניהול של צוות הפיתוח
+# =========================================================
 class ProductOut(BaseModel):
     id: str
     name: str
@@ -180,8 +195,6 @@ class AdminOrderStatusUpdateResponse(BaseModel):
     order_id: str
     data: dict[str, Any] | None = None
 
-    quantity: int = Field(default=1, gt=0) 
-    
 class CheckoutRequest(BaseModel):
     user_id: str
     client_name: str
@@ -256,6 +269,7 @@ def _search_products_in_supabase(
     return [_row_to_product(row) for row in rows]
 
 
+
 def _messages_to_gemini_contents(messages: list[ChatTurn]) -> list[types.Content]:
     out: list[types.Content] = []
     for turn in messages:
@@ -314,10 +328,6 @@ def search_products(
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest):
-    """
-    מקבל הודעות מהפרונטאנד, קורא ל-Gemini בצד השרת, שומר שאלה+תשובה ב-Supabase (טבלה data_table),
-    ומחזיר את תשובת המודל.
-    """
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=503, detail="GEMINI_API_KEY לא מוגדר בשרת")
 
@@ -354,29 +364,132 @@ async def chat(payload: ChatRequest):
 
 @app.post("/add_data")
 async def add_data(user_data: UserInput):
-    """
-    נקודת קצה שמקבלת נתונים מה-Frontend ושומרת אותם בטבלה ב-Supabase.
-    יש לוודא קיום טבלה בשם 'user_inputs' ב-Supabase.
-    """
     if not supabase:
         raise HTTPException(status_code=500, detail="חיבור ל-Supabase לא הוגדר כראוי")
     
     try:
-        # הזנת הנתונים לטבלה 'user_inputs'
-        # עמודות בטבלה: user_name, content
         data = {
             "user_name": user_data.name,
             "content": user_data.content
         }
-        
         response = supabase.table("user_inputs").insert(data).execute()
-        
-        # החזרת תשובה חיובית למשתמש
         return {"status": "success", "data": response.data}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"שגיאה בשמירת הנתונים: {str(e)}")
+
+@app.patch("/api/appointments/{appointment_id}/status")
+async def update_appointment_status(appointment_id: int, status_update: AppointmentStatusUpdate):
+    """מעדכן סטטוס של תור קיים (למשל: canceled)"""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+    
+    try:
+        response = supabase.table("appointments") \
+            .update({"status": status_update.status}) \
+            .eq("id", appointment_id) \
+            .execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="התור לא נמצא")
+            
+        return {"status": "success", "data": response.data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"שגיאה בעדכון התור: {str(e)}")
+
+# =========================================================
+# נתיבים (Routes) חדשים עבור מערכת התורים
+# =========================================================
+
+@app.get("/api/appointments/available-slots")
+async def get_available_slots(date: str):
+    """
+    מקבל תאריך (YYYY-MM-DD) ומחזיר את חלונות הזמן הפנויים באותו יום.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+    
+    # שעות הפעילות המוגדרות של הקליניקה (ניתן לשנות בהתאם לצורך)
+    all_possible_slots = ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"]
+    
+    try:
+        # שליפת כל התורים התפוסים לאותו תאריך שאינם מבוטלים
+        response = supabase.table("appointments") \
+            .select("appointment_time") \
+            .eq("appointment_date", date) \
+            .neq("status", "canceled") \
+            .execute()
+        
+        # חילוץ השעות התפוסות מתוך תוצאות השילפה
+        booked_slots = [row["appointment_time"] for row in response.data]
+        
+        # סינון חלונות הזמן - משאירים רק את השעות שלא קיימות ב-booked_slots
+        available_slots = [slot for slot in all_possible_slots if slot not in booked_slots]
+        
+        return {
+            "date": date,
+            "available_slots": available_slots
+        }
         
     except Exception as e:
-        # טיפול בשגיאות (למשל אם הטבלה לא קיימת או בעיית תקשורת)
-        raise HTTPException(status_code=400, detail=f"שגיאה בשמירת הנתונים: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"שגיאה בשליפת חלונות זמן פנויים: {str(e)}")
+
+@app.get("/api/appointments")
+async def get_all_appointments():
+    """שליפת כל התורים מהמסד והחזרתם לפרונטאנד"""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+    
+    try:
+        # שליפת כל התורים ומיון לפי תאריך
+        response = supabase.table("appointments").select("*").order("appointment_date").execute()
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"שגיאה בשליפת התורים: {str(e)}")
+    
+@app.post("/api/appointments/book")
+async def book_appointment(appointment: AppointmentCreate):
+    """
+    קובע תור חדש. בודק קודם בשרת שהחלון המבוקש לא נתפס ברגע האחרון.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+    
+    try:
+        # בדיקה של הרגע האחרון ב-DB: האם כבר קיים תור מאושר באותו תאריך ובאותה שעה
+        check_existing = supabase.table("appointments") \
+            .select("id") \
+            .eq("appointment_date", appointment.appointment_date) \
+            .eq("appointment_time", appointment.appointment_time) \
+            .neq("status", "canceled") \
+            .execute()
+        
+        if check_existing.data:
+            raise HTTPException(status_code=400, detail="חלון הזמן שנבחר כבר נתפס, אנא בחר שעה אחרת.")
+        
+        # הכנת האובייקט לשמירה ב-Supabase
+        new_row = {
+            "client_name": appointment.client_name,
+            "phone": appointment.phone,
+            "treatment_type": appointment.treatment_type,
+            "appointment_date": appointment.appointment_date,
+            "appointment_time": appointment.appointment_time,
+            "status": "confirmed"
+        }
+        
+        # שמירת התור בטבלה
+        response = supabase.table("appointments").insert(new_row).execute()
+        
+        return {
+            "status": "success",
+            "message": "התור נקבע בהצלחה!",
+            "data": response.data
+        }
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"שגיאה בתהליך קביעת התור: {str(e)}")
+
 
 # ==========================================
 # Add to Cart & View Cart
@@ -707,5 +820,5 @@ async def get_user_orders(user_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    # הרצה על פורט 3000 כברירת מחדל לסביבה זו
+    # הרצה על פורט 3000 כברירת מחדל
     uvicorn.run(app, host="0.0.0.0", port=3000)

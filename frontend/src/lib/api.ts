@@ -5,28 +5,31 @@
 
 /** בפיתוח (npm run dev) משתמשים ב-Vite proxy — לא צריך לשנות .env */
 const API_URL = import.meta.env.DEV
-  ? ''
-  : (import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000');
+  ? ""
+  : import.meta.env.VITE_BACKEND_URL || "http://localhost:3000";
+
+// שומרים גם את המשתנה שלך כדי שהתורים יעבדו בלי שינויים נוספים
+const BACKEND_URL = API_URL;
 
 export type ChatTurn = {
-  role: 'user' | 'model';
+  role: "user" | "model";
   parts: { text: string }[];
 };
 
 export async function sendChatToBackend(messages: ChatTurn[]) {
   const response = await fetch(`${API_URL}/api/chat`, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({ messages }),
   });
 
   if (!response.ok) {
-    let detail = 'שגיאה בשרת הצ׳אט';
+    let detail = "שגיאה בשרת הצ׳אט";
     try {
       const errorData = await response.json();
-      detail = typeof errorData.detail === 'string' ? errorData.detail : detail;
+      detail = typeof errorData.detail === "string" ? errorData.detail : detail;
     } catch {
       /* ignore */
     }
@@ -56,10 +59,10 @@ export async function fetchProducts(): Promise<ProductSearchResult> {
   const response = await fetch(`${API_URL}/api/products`);
 
   if (!response.ok) {
-    let detail = 'שגיאה בטעינת מוצרים';
+    let detail = "שגיאה בטעינת מוצרים";
     try {
       const errorData = await response.json();
-      detail = typeof errorData.detail === 'string' ? errorData.detail : detail;
+      detail = typeof errorData.detail === "string" ? errorData.detail : detail;
     } catch {
       /* ignore */
     }
@@ -74,20 +77,23 @@ export async function searchProducts(params: {
   category?: string;
 }): Promise<ProductSearchResult> {
   const searchParams = new URLSearchParams();
-  if (params.q?.trim()) searchParams.set('q', params.q.trim());
-  if (params.category?.trim()) searchParams.set('category', params.category.trim());
+  if (params.q?.trim()) searchParams.set("q", params.q.trim());
+  if (params.category?.trim())
+    searchParams.set("category", params.category.trim());
 
   if (!searchParams.toString()) {
-    throw new Error('יש להזין מילת חיפוש');
+    throw new Error("יש להזין מילת חיפוש");
   }
 
-  const response = await fetch(`${API_URL}/api/products/search?${searchParams}`);
+  const response = await fetch(
+    `${API_URL}/api/products/search?${searchParams}`,
+  );
 
   if (!response.ok) {
-    let detail = 'שגיאה בחיפוש מוצרים';
+    let detail = "שגיאה בחיפוש מוצרים";
     try {
       const errorData = await response.json();
-      detail = typeof errorData.detail === 'string' ? errorData.detail : detail;
+      detail = typeof errorData.detail === "string" ? errorData.detail : detail;
     } catch {
       /* ignore */
     }
@@ -120,6 +126,94 @@ export async function addSupabaseData(name: string, content: string) {
     throw error;
   }
 }
+
+// ------------------------------------------------------------------
+// פונקציות התורים (Scheduling) שלך
+// ------------------------------------------------------------------
+
+// 3. שליפת כל התורים הקיימים
+export async function fetchAppointments() {
+  const response = await fetch(`${BACKEND_URL}/api/appointments`);
+  if (!response.ok) {
+    throw new Error("שגיאה בשליפת התורים");
+  }
+  return response.json();
+}
+
+// 4. עדכון סטטוס של תור (למשל: ביטול תור)
+export async function updateAppointmentStatusInDB(id: string, status: string) {
+  const response = await fetch(`${BACKEND_URL}/api/appointments/${id}/status`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ status }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || "שגיאה בעדכון התור");
+  }
+
+  return response.json();
+}
+
+// 1. שליפת חלונות זמן פנויים עבור תאריך ספציפי
+export async function fetchAvailableSlots(date: string): Promise<string[]> {
+  try {
+    const response = await fetch(
+      `${BACKEND_URL}/api/appointments/available-slots?date=${date}`,
+    );
+    if (!response.ok) {
+      throw new Error("שגיאה בשליפת השעות הפנויות");
+    }
+    const data = await response.json();
+    // במידה והשרת לא מחזיר מידע תקני, נחזיר גיבוי כמו קודם
+    return (
+      data.available_slots ||
+      data.slots || [
+        "09:00",
+        "10:00",
+        "11:00",
+        "13:00",
+        "14:00",
+        "16:00",
+        "17:00",
+      ]
+    );
+  } catch (error) {
+    console.error("Error fetching slots:", error);
+    return ["09:00", "10:00", "11:00", "12:00", "14:00", "15:00"];
+  }
+}
+
+// 2. שמירת תור חדש בבסיס הנתונים
+export async function createAppointment(appointmentData: {
+  client_name: string;
+  phone: string;
+  treatment_type: string;
+  appointment_date: string;
+  appointment_time: string;
+}) {
+  const response = await fetch(`${BACKEND_URL}/api/appointments/book`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(appointmentData),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || "חלה שגיאה במהלך קביעת התור");
+  }
+
+  return response.json();
+}
+
+// ------------------------------------------------------------------
+// פונקציות ניהול ועגלת קניות (הקוד של חברי הצוות)
+// ------------------------------------------------------------------
 
 export async function fetchCartFromBackend(
   userId: string,
@@ -154,7 +248,9 @@ export type AdminUserDto = {
   last_sign_in_at: string | null;
 };
 
-export async function fetchAdminUsers(accessToken: string): Promise<AdminUserDto[]> {
+export async function fetchAdminUsers(
+  accessToken: string,
+): Promise<AdminUserDto[]> {
   const response = await fetch(`${API_URL}/api/admin/users`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -162,19 +258,19 @@ export async function fetchAdminUsers(accessToken: string): Promise<AdminUserDto
   });
 
   if (!response.ok) {
-    let detail = 'שגיאה בטעינת משתמשים';
+    let detail = "שגיאה בטעינת משתמשים";
     try {
       const errorData = await response.json();
-      detail = typeof errorData.detail === 'string' ? errorData.detail : detail;
+      detail = typeof errorData.detail === "string" ? errorData.detail : detail;
     } catch {
       /* ignore */
     }
 
     if (response.status === 403) {
-      throw new Error('אין לך הרשאות גישה לניהול משתמשים');
+      throw new Error("אין לך הרשאות גישה לניהול משתמשים");
     }
     if (response.status === 401) {
-      throw new Error('יש להתחבר מחדש כדי לצפות במשתמשים');
+      throw new Error("יש להתחבר מחדש כדי לצפות במשתמשים");
     }
     throw new Error(detail);
   }
@@ -195,7 +291,7 @@ async function parseApiError(
 ): Promise<string> {
   try {
     const errorData = await response.json();
-    return typeof errorData.detail === 'string' ? errorData.detail : fallback;
+    return typeof errorData.detail === "string" ? errorData.detail : fallback;
   } catch {
     return fallback;
   }
@@ -207,21 +303,21 @@ export async function updateAdminUser(
   payload: AdminUserUpdatePayload,
 ): Promise<void> {
   const response = await fetch(`${API_URL}/api/admin/users/${userId}`, {
-    method: 'PUT',
+    method: "PUT",
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
-    const detail = await parseApiError(response, 'שגיאה בעדכון משתמש');
+    const detail = await parseApiError(response, "שגיאה בעדכון משתמש");
     if (response.status === 403) {
-      throw new Error('אין לך הרשאות לעדכן משתמשים');
+      throw new Error("אין לך הרשאות לעדכן משתמשים");
     }
     if (response.status === 401) {
-      throw new Error('יש להתחבר מחדש');
+      throw new Error("יש להתחבר מחדש");
     }
     throw new Error(detail);
   }
@@ -232,19 +328,19 @@ export async function deleteAdminUser(
   userId: string,
 ): Promise<void> {
   const response = await fetch(`${API_URL}/api/admin/users/${userId}`, {
-    method: 'DELETE',
+    method: "DELETE",
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
   });
 
   if (!response.ok) {
-    const detail = await parseApiError(response, 'שגיאה במחיקת משתמש');
+    const detail = await parseApiError(response, "שגיאה במחיקת משתמש");
     if (response.status === 403) {
-      throw new Error('אין לך הרשאות למחוק משתמשים');
+      throw new Error("אין לך הרשאות למחוק משתמשים");
     }
     if (response.status === 401) {
-      throw new Error('יש להתחבר מחדש');
+      throw new Error("יש להתחבר מחדש");
     }
     throw new Error(detail);
   }
@@ -270,35 +366,10 @@ export function isValidAdminOrder(
 ): order is AdminOrderDto {
   if (order == null) return false;
   const { order_id: id } = order;
-  if (typeof id === 'number') return Number.isFinite(id);
-  if (typeof id === 'string') return id.length > 0;
+  if (typeof id === "number") return Number.isFinite(id);
+  if (typeof id === "string") return id.length > 0;
   return false;
 }
-
-// export async function fetchAdminOrders(
-//   accessToken: string,
-// ): Promise<AdminOrderDto[]> {
-//   const response = await fetch(`${API_URL}/api/admin/orders`, {
-//     headers: {
-//       Authorization: `Bearer ${accessToken}`,
-//     },
-//   });
-
-//   if (!response.ok) {
-//     const detail = await parseApiError(response, 'שגיאה בטעינת הזמנות');
-//     if (response.status === 403) {
-//       throw new Error('אין לך הרשאות גישה לניהול הזמנות');
-//     }
-//     if (response.status === 401) {
-//       throw new Error('יש להתחבר מחדש כדי לצפות בהזמנות');
-//     }
-//     throw new Error(detail);
-//   }
-
-//   const data = await response.json();
-//   if (!Array.isArray(data)) return [];
-//   return data.filter((order): order is AdminOrderDto => isValidAdminOrder(order));
-// }
 
 export async function fetchAdminOrders(
   accessToken: string,
@@ -310,33 +381,35 @@ export async function fetchAdminOrders(
   });
 
   if (!response.ok) {
-    const detail = await parseApiError(response, 'שגיאה בטעינת הזמנות');
+    const detail = await parseApiError(response, "שגיאה בטעינת הזמנות");
     if (response.status === 403) {
-      throw new Error('אין לך הרשאות גישה לניהול הזמנות');
+      throw new Error("אין לך הרשאות גישה לניהול הזמנות");
     }
     if (response.status === 401) {
-      throw new Error('יש להתחבר מחדש כדי לצפות בהזמנות');
+      throw new Error("יש להתחבר מחדש כדי לצפות בהזמנות");
     }
     throw new Error(detail);
   }
 
   // 1. קריאת המידע הגולמי האמיתי שחזר מהשרת
   const data = await response.json();
-  console.log('🔍 [API] 1. RAW JSON FROM FETCH:', data);
+  console.log("🔍 [API] 1. RAW JSON FROM FETCH:", data);
 
   // 2. חילוץ המערך (למקרה שהשרת עטף אותו במילה data)
-  const items = Array.isArray(data) ? data : (data?.data || []);
-  console.log('🔍 [API] 2. EXTRACTED ITEMS:', items);
+  const items = Array.isArray(data) ? data : data?.data || [];
+  console.log("🔍 [API] 2. EXTRACTED ITEMS:", items);
 
   // אם זה עדיין לא מערך אחרי החילוץ, נחזיר ריק
   if (!Array.isArray(items)) {
-    console.error('🔍 [API] ERROR: Items is STILL not an array!', items);
+    console.error("🔍 [API] ERROR: Items is STILL not an array!", items);
     return [];
   }
 
   // 3. סינון לפי החוקים שלך
-  const validItems = items.filter((order): order is AdminOrderDto => isValidAdminOrder(order));
-  console.log('🔍 [API] 3. ITEMS AFTER VALIDATION FILTER:', validItems);
+  const validItems = items.filter((order): order is AdminOrderDto =>
+    isValidAdminOrder(order),
+  );
+  console.log("🔍 [API] 3. ITEMS AFTER VALIDATION FILTER:", validItems);
 
   return validItems;
 }
@@ -349,22 +422,22 @@ export async function updateAdminOrderStatus(
   const response = await fetch(
     `${API_URL}/api/admin/orders/${orderId}/status`,
     {
-      method: 'PUT',
+      method: "PUT",
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ status }),
     },
   );
 
   if (!response.ok) {
-    const detail = await parseApiError(response, 'שגיאה בעדכון סטטוס הזמנה');
+    const detail = await parseApiError(response, "שגיאה בעדכון סטטוס הזמנה");
     if (response.status === 403) {
-      throw new Error('אין לך הרשאות לעדכן הזמנות');
+      throw new Error("אין לך הרשאות לעדכן הזמנות");
     }
     if (response.status === 401) {
-      throw new Error('יש להתחבר מחדש');
+      throw new Error("יש להתחבר מחדש");
     }
     throw new Error(detail);
   }
@@ -422,28 +495,31 @@ export type CheckoutResponse = {
   order_id: string | null;
 };
 
-export async function sendCheckoutToBackend(params: CheckoutParams): Promise<CheckoutResponse> {
+export async function sendCheckoutToBackend(
+  params: CheckoutParams,
+): Promise<CheckoutResponse> {
   try {
     const response = await fetch(`${API_URL}/api/checkout`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         user_id: params.userId,
         client_name: params.clientName,
         items: params.items,
         total_price: params.totalPrice,
-        payment_method: params.paymentMethod || 'credit_card',
+        payment_method: params.paymentMethod || "credit_card",
         card_token_or_raw: params.cardTokenOrRaw,
       }),
     });
 
     if (!response.ok) {
-      let detail = 'שגיאה בתהליך התשלום וההזמנה';
+      let detail = "שגיאה בתהליך התשלום וההזמנה";
       try {
         const errorData = await response.json();
-        detail = typeof errorData.detail === 'string' ? errorData.detail : detail;
+        detail =
+          typeof errorData.detail === "string" ? errorData.detail : detail;
       } catch {
         /* ignore */
       }
@@ -457,7 +533,9 @@ export async function sendCheckoutToBackend(params: CheckoutParams): Promise<Che
   }
 }
 
-export async function fetchUserOrdersFromBackend(userId: string): Promise<any[]> {
+export async function fetchUserOrdersFromBackend(
+  userId: string,
+): Promise<any[]> {
   try {
     const response = await fetch(`${API_URL}/api/orders?user_id=${userId}`);
 
