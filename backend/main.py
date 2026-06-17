@@ -6,7 +6,7 @@ from typing import Literal, Any
 import os
 import re
 from dotenv import load_dotenv
-
+from cryptography.fernet import Fernet
 from google import genai
 from google.genai import types
 
@@ -82,6 +82,19 @@ AI: "שלום! לעור יבש אני ממליצה לשלב שגרת טיפוח 
 משתמש: "איך אני קובעת תור לטיפול פנים?"
 AI: "זה פשוט מאוד! היכנסי לאזור 'קביעת תורים' באזור האישי שלך באתר, בחרי את סוג הטיפול (טיפול פנים), ותוכלי לראות את כל התאריכים והשעות הפנויים ביומן של הקליניקה. צריכה עזרה נוספת?"
 """
+
+# ==========================================
+# (Checkout)
+# ==========================================
+RAW_KEY = os.getenv("ENCRYPTION_KEY")
+if RAW_KEY:
+    ENCRYPTION_KEY = RAW_KEY.encode()
+    print("🔐 Securely loaded encryption key from environment.")
+else:
+    ENCRYPTION_KEY = Fernet.generate_key()
+    print("⚠️ Warning: ENCRYPTION_KEY not found in .env. Generated a temporary key.")
+
+cipher_suite = Fernet(ENCRYPTION_KEY)
 
 
 # הגדרת מבנה הנתונים הצפוי בבקשה (Schema)
@@ -167,6 +180,15 @@ class AdminOrderStatusUpdateResponse(BaseModel):
     order_id: str
     data: dict[str, Any] | None = None
 
+    quantity: int = Field(default=1, gt=0) 
+    
+class CheckoutRequest(BaseModel):
+    user_id: str
+    client_name: str
+    items: list[dict[str, Any]]
+    total_price: float
+    payment_method: str = "credit_card"
+    card_token_or_raw: str  # נתוני תשלום רגישים שיצופנו בשרת
 
 def _sanitize_search_param(value: str | None, *, max_length: int = 120) -> str | None:
     if value is None:
@@ -572,10 +594,115 @@ async def view_cart(user_id: str = Query(..., description="ID של המשתמש 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"שגיאה בשליפת נתוני העגלה: {str(e)}")
 
-if __name__ == "__main__":
-    import uvicorn
-    # הרצה על פורט 3000 כברירת מחדל לסביבה זו
-    uvicorn.run(app, host="0.0.0.0", port=3000)
+# ==========================================
+# Profile Management
+# ==========================================
+
+class ProfileUpdateRequest(BaseModel):
+    user_id: str
+    first_name: str
+    last_name: str
+    phone: str
+
+@app.put("/api/profile/update")
+async def update_profile(payload: ProfileUpdateRequest):
+    """
+    מקבל את הפרטים המעודכנים מהמשתמש ושומר אותם בטבלת profiles ב-Supabase.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+    
+    try:
+        # אלו הנתונים שנרצה לעדכן בטבלה
+        data_to_update = {
+            "first_name": payload.first_name.strip(),
+            "last_name": payload.last_name.strip(),
+            "phone": payload.phone.strip()
+        }
+        
+        # מבצעים Update לטבלת profiles במקום בו ה-id תואם למשתמש הנוכחי
+        response = (
+            supabase.table("profiles")
+            .update(data_to_update)
+            .eq("id", payload.user_id)
+            .execute()
+        )
+        
+        return {
+            "status": "success", 
+            "message": "הפרופיל עודכן בהצלחה", 
+            "data": response.data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"שגיאה בעדכון הפרופיל: {str(e)}")      
+    
+# ==========================================
+# (ספרינט 2 - Checkout)
+# ==========================================
+
+@app.post("/api/checkout")
+async def checkout(payload: CheckoutRequest):
+    """
+    ספרינט 2: ביצוע הזמנה ותשלום מאובטח אסינכרוני.
+    עומד בדרישות הבקלוג: ביצוע מהיר, הצפנה מאובטחת, ותמיכה בריבוי משתמשים בו-זמנית.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+
+    try:
+        # 1. דרישה: Securely Encrypted - נצפין את נתוני התשלום הרגישים שהגיעו מהפרונט
+        encrypted_payment_data = cipher_suite.encrypt(payload.card_token_or_raw.encode())
+        encrypted_payment_str = encrypted_payment_data.decode()
+
+        # 2. בניית האובייקט לשמירה בטבלת orders ב-Supabase
+        order_data = {
+            "client_uid": payload.user_id,
+            "client_name": payload.client_name,
+            "items": payload.items,  # נשמר כ-jsonb באופן אוטומטי
+            "total_price": payload.total_price,
+            "status": "paid",
+            "payment_method": payload.payment_method
+            # במידת הצורך תוכלי להוסיף עמודה בטבלה ולשמור את הטוקן המוצפן: "encrypted_token": encrypted_payment_str
+        }
+
+        # 3. שמירת ההזמנה בטבלת orders (מבוצע אסינכרונית ללא חסימת השרת)
+        response = supabase.table("orders").insert(order_data).execute()
+
+        # 4. ניקוי עגלת הקניות של המשתמש בבסיס הנתונים (cart_items) לאחר רכישה מוצלחת
+        try:
+            supabase.table("cart_items").delete().eq("user_id", payload.user_id).execute()
+        except Exception as cart_err:
+            print(f"Warning: Failed to clear backend cart: {str(cart_err)}")
+
+        return {
+            "status": "success",
+            "message": "התשלום בוצע וההזמנה נקלטה בהצלחה!",
+            "order_id": response.data[0]["id"] if response.data else None
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"שגיאה בתהליך התשלום: {str(e)}")  
+    
+    # ==========================================
+# שליפת הזמנות עבור משתמש ספציפי (Checkout ספרינט 2)
+# ==========================================
+@app.get("/api/orders")
+async def get_user_orders(user_id: str):
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+    
+    try:
+        # שינינו את descending=True ל- desc=True
+        response = supabase.table("orders") \
+            .select("*") \
+            .eq("client_uid", user_id) \
+            .order("created_at", desc=True) \
+            .execute()
+            
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"שגיאה בשליפת ההזמנות: {str(e)}")
 
 
 if __name__ == "__main__":

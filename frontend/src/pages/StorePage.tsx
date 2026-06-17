@@ -128,7 +128,7 @@ export default function StorePage({
       </div>
 
       <div className="flex flex-col items-center gap-2 w-full">
-        <SearchBar onQueryChange={setQuery} isLoading={isLoading || isSearching} />
+      <SearchBar onQueryChange={setQuery} isLoading={isLoading} />
         {(isLoading || isSearching) && (
           <p className="text-xs text-brand-dark/50">
             {isLoading ? 'טוען מוצרים...' : 'מחפש...'}
@@ -143,7 +143,7 @@ export default function StorePage({
             ודאי שהבקאנד רץ על פורט 8000:
             <br />
             <code className="text-xs bg-white px-2 py-1 rounded">
-              uvicorn main:app --reload --port 3000
+              uvicorn main:app --reload --port 8000
             </code>
           </p>
           <button
