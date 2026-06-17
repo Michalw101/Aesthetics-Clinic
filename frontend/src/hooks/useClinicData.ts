@@ -1,5 +1,9 @@
 import { useState, useCallback, useEffect } from "react";
-import { fetchAppointments, updateAppointmentStatusInDB } from "../lib/api";
+import {
+  fetchAppointments,
+  updateAppointmentStatusInDB,
+  fetchUserOrdersFromBackend,
+} from "../lib/api";
 
 export function useClinicData(userId: string | undefined) {
   const [products, setProducts] = useState<any[]>([]);
@@ -12,7 +16,7 @@ export function useClinicData(userId: string | undefined) {
   const [reviews, setReviews] = useState<any[]>([]);
   const [treatments, setTreatments] = useState<any[]>([]);
 
-  // הפונקציה החדשה ששואבת נתונים מהשרת (Supabase)
+  // הפונקציה החדשה ששואבת נתונים מהשרת (Supabase) עבור התורים
   const loadAppointments = useCallback(async () => {
     try {
       const data = await fetchAppointments();
@@ -44,6 +48,35 @@ export function useClinicData(userId: string | undefined) {
   useEffect(() => {
     loadAppointments();
   }, [loadAppointments]);
+
+  // טעינת הזמנות המשתמש מהשרת
+  useEffect(() => {
+    if (!userId) {
+      setOrders([]); // אם אין משתמש מחובר, ננקה את ההזמנות
+      return;
+    }
+
+    async function loadOrders() {
+      // קוראים לשרת ומביאים את ההזמנות מ-Supabase
+      const dbOrders = await fetchUserOrdersFromBackend(userId!);
+
+      // הופכים את השמות מהבסיס נתונים (snake_case) לשמות שהפרונט מכיר (camelCase)
+      const mappedOrders = dbOrders.map((order: any) => ({
+        id: order.id,
+        clientUid: order.client_uid,
+        clientName: order.client_name,
+        items: order.items || [],
+        totalPrice: order.total_price ?? order.totalPrice,
+        status: order.status || "paid",
+        createdAt: order.created_at || order.createdAt,
+      }));
+
+      // מעדכנים את ה-State כדי שהמסך יתרענן ויציג אותן
+      setOrders(mappedOrders);
+    }
+
+    loadOrders();
+  }, [userId]); // רץ אוטומטית בכל פעם שהמשתמש מתחבר או משתנה
 
   // ==========================================
   // שאר הפונקציות נשארות כמו שהן כדי לא לשבור את האפליקציה
@@ -131,7 +164,13 @@ export function useClinicData(userId: string | undefined) {
     setTreatments((prev) => prev.filter((t) => t.id !== id));
   };
 
-  const userOrders = userId ? orders.filter((o) => o.clientUid === userId) : [];
+  // סינון עבור משתמש ספציפי (ממזג את הבקשות שלך ושל הצוות)
+  const userAppointments = userId
+    ? appointments.filter((a) => a.clientUid === userId || !a.clientUid) // בהנחה שכרגע אין clientUid בתורים, אז נציג הכל כברירת מחדל עד שיתווסף
+    : [];
+
+  // ההזמנות כבר מסונננות מהשרת בזכות ה-useEffect, אז פשוט מחזירים אותן
+  const userOrders = orders;
 
   return {
     products,

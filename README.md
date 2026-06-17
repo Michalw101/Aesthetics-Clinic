@@ -33,6 +33,8 @@ A full-stack web application for an aesthetics clinic: product consultation, tre
 | `GET` | `/` | Health check |
 | `POST` | `/api/chat` | Sends chat history to Gemini; saves Q&A to Supabase `data_table`; returns `{ "reply": "..." }` |
 | `POST` | `/add_data` | Saves name + message to Supabase `user_inputs` |
+| `GET` | `/api/products` | List all products from Supabase |
+| `GET` | `/api/products/search?q=...&category=...` | Search products by name, brand, or category (Supabase `search_products` RPC) |
 
 ## Prerequisites
 
@@ -62,6 +64,8 @@ create table if not exists public.user_inputs (
   created_at timestamptz default now()
 );
 ```
+
+**Products + search** (user story: Search products) — **פעם אחת** בפרויקט המשותף: הריצו [`backend/sql/products_search.sql`](backend/sql/products_search.sql) ב-Supabase SQL Editor (יוצר טבלת `products`, פונקציית חיפוש, ו-4 מוצרי דוגמה). אחרי זה כל מי שמחובר לאותו `SUPABASE_URL` רואה את אותם מוצרים.
 
 Enable Row Level Security policies as needed for your environment, or restrict access so only the backend service role key can write (recommended for production).
 
@@ -126,11 +130,15 @@ copy .env.example .env   # Windows
 # cp .env.example .env   # macOS / Linux
 ```
 
-Edit `frontend/.env`:
+Edit `frontend/.env` (copy from `.env.example`):
 
 ```env
-VITE_BACKEND_URL=http://localhost:8000
+VITE_BACKEND_URL=http://localhost:3000
 ```
+
+> **פיתוח מקומי (`npm run dev`):** אין צורך לשנות את `VITE_BACKEND_URL`. Vite מנתב אוטומטית את `/api` לבקאנד על פורט **8000**. הריצו: `uvicorn main:app --reload --port 8000`.
+>
+> **Docker:** `VITE_BACKEND_URL=http://localhost:3000` נכון — הבקאנד בקונטיינר על 3000.
 
 Start the dev server:
 
@@ -205,7 +213,9 @@ Aesthetics Clinic/
 │   └── .env.example
 ├── frontend/
 │   ├── src/
-│   │   ├── App.tsx          # Main UI
+│   │   ├── App.tsx          # Main UI shell & routing
+│   │   ├── pages/           # Page components (e.g. StorePage + product search)
+│   │   ├── components/      # Reusable UI (e.g. SearchBar)
 │   │   ├── hooks/           # Auth & clinic state
 │   │   └── lib/             # API client, utilities
 │   ├── package.json

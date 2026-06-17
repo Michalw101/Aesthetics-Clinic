@@ -7,3 +7,17 @@ export function formatDisplayDate(value: unknown): string {
   const d = new Date(String(value));
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('he-IL');
 }
+
+/** תאריך ושעה לתצוגה (למשל: פעילות אחרונה) */
+export function formatDisplayDateTime(value: unknown): string {
+  if (value == null) return '—';
+  const d = new Date(String(value));
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('he-IL', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}

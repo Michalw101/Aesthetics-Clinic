@@ -1,13 +1,16 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from supabase import create_client, Client
-from typing import Literal
+from typing import Literal, Any
 import os
+import re
 from dotenv import load_dotenv
-
+from cryptography.fernet import Fernet
 from google import genai
 from google.genai import types
+
+from auth import get_supabase_admin, require_admin
 
 # טעינת משתני סביבה מקובץ .env
 load_dotenv()
@@ -80,6 +83,19 @@ AI: "שלום! לעור יבש אני ממליצה לשלב שגרת טיפוח 
 AI: "זה פשוט מאוד! היכנסי לאזור 'קביעת תורים' באזור האישי שלך באתר, בחרי את סוג הטיפול (טיפול פנים), ותוכלי לראות את כל התאריכים והשעות הפנויים ביומן של הקליניקה. צריכה עזרה נוספת?"
 """
 
+# ==========================================
+# (Checkout)
+# ==========================================
+RAW_KEY = os.getenv("ENCRYPTION_KEY")
+if RAW_KEY:
+    ENCRYPTION_KEY = RAW_KEY.encode()
+    print("🔐 Securely loaded encryption key from environment.")
+else:
+    ENCRYPTION_KEY = Fernet.generate_key()
+    print("⚠️ Warning: ENCRYPTION_KEY not found in .env. Generated a temporary key.")
+
+cipher_suite = Fernet(ENCRYPTION_KEY)
+
 
 # סכמות נתונים קיימות
 class UserInput(BaseModel):
@@ -107,7 +123,7 @@ class ChatResponse(BaseModel):
 
 
 # =========================================================
-# סכמות נתונים חדשות עבור מערכת התורים (Pydantic Models)
+# סכמות נתונים חדשות עבור מערכת התורים (Pydantic Models) - של ציפורה
 # =========================================================
 class AppointmentCreate(BaseModel):
     client_name: str
@@ -115,6 +131,143 @@ class AppointmentCreate(BaseModel):
     treatment_type: str
     appointment_date: str  # פורמט צפוי: YYYY-MM-DD
     appointment_time: str  # פורמט צפוי: HH:MM
+
+
+# =========================================================
+# סכמות מוצרים וניהול של צוות הפיתוח
+# =========================================================
+class ProductOut(BaseModel):
+    id: str
+    name: str
+    brand: str
+    category: str
+    price: float
+    image_url: str | None = None
+    stock: int = 0
+
+
+class ProductSearchResponse(BaseModel):
+    products: list[ProductOut]
+    count: int
+    
+class AddToCartRequest(BaseModel):
+    user_id: str      
+    product_id: str  
+    quantity: int = Field(default=1, gt=0)
+
+
+class AdminUserOut(BaseModel):
+    id: str
+    email: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    phone: str | None = None
+    is_admin: bool = False
+    last_sign_in_at: str | None = None
+
+
+class AdminUserUpdateRequest(BaseModel):
+    first_name: str
+    last_name: str
+    phone: str
+    is_admin: bool = False
+
+
+class AdminUserUpdateResponse(BaseModel):
+    status: str = "success"
+    message: str
+    data: dict[str, Any]
+
+
+class AdminUserDeleteResponse(BaseModel):
+    status: str = "success"
+    message: str
+    user_id: str
+
+
+class AdminOrderStatusUpdateRequest(BaseModel):
+    status: str = Field(min_length=1, max_length=50)
+
+
+class AdminOrderStatusUpdateResponse(BaseModel):
+    status: str = "success"
+    message: str
+    order_id: str
+    data: dict[str, Any] | None = None
+
+class CheckoutRequest(BaseModel):
+    user_id: str
+    client_name: str
+    items: list[dict[str, Any]]
+    total_price: float
+    payment_method: str = "credit_card"
+    card_token_or_raw: str  # נתוני תשלום רגישים שיצופנו בשרת
+
+def _sanitize_search_param(value: str | None, *, max_length: int = 120) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > max_length:
+        raise HTTPException(
+            status_code=400,
+            detail=f"פרמטר החיפוש ארוך מדי (מקסימום {max_length} תווים)",
+        )
+    if re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", cleaned):
+        raise HTTPException(status_code=400, detail="פרמטר חיפוש לא תקין")
+    return cleaned
+
+
+def _row_to_product(row: dict[str, Any]) -> ProductOut:
+    return ProductOut(
+        id=str(row["id"]),
+        name=row["name"],
+        brand=row.get("brand") or "",
+        category=row.get("category") or "",
+        price=float(row["price"]),
+        image_url=row.get("image_url"),
+        stock=int(row.get("stock") or 0),
+    )
+
+
+def _search_products_direct(
+    search_term: str | None,
+    category_filter: str | None,
+) -> list[dict[str, Any]]:
+    query = supabase.table("products").select("*")
+
+    if search_term:
+        pattern = f"{search_term}%"
+        query = query.or_(
+            f"name.ilike.{pattern},category.ilike.{pattern},brand.ilike.{pattern}"
+        )
+
+    if category_filter:
+        query = query.ilike("category", f"{category_filter}%")
+
+    response = query.order("name").execute()
+    return response.data or []
+
+
+def _search_products_in_supabase(
+    search_term: str | None,
+    category_filter: str | None,
+) -> list[ProductOut]:
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+
+    try:
+        rows = _search_products_direct(search_term, category_filter)
+    except Exception as e:
+        print(f"Error querying products from Supabase: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="שגיאה בגישה לטבלת products ב-Supabase. בדקי SUPABASE_URL ו-SUPABASE_KEY ב-backend/.env",
+        ) from e
+
+    return [_row_to_product(row) for row in rows]
+
 
 
 def _messages_to_gemini_contents(messages: list[ChatTurn]) -> list[types.Content]:
@@ -136,6 +289,41 @@ def _last_user_question(messages: list[ChatTurn]) -> str:
 @app.get("/")
 def home():
     return {"message": "השרת פעיל ומוכן לקבל בקשות"}
+
+
+@app.get("/api/products", response_model=ProductSearchResponse)
+def list_products():
+    """מחזיר את כל המוצרים מ-Supabase (לתצוגה בחנות)."""
+    products = _search_products_in_supabase(None, None)
+    return ProductSearchResponse(products=products, count=len(products))
+
+
+@app.get("/api/products/search", response_model=ProductSearchResponse)
+def search_products(
+    q: str | None = Query(
+        default=None,
+        description="חיפוש לפי שם מוצר, מותג או קטגוריה",
+    ),
+    category: str | None = Query(
+        default=None,
+        description="סינון נוסף לפי קטגוריה",
+    ),
+):
+    """
+    Task 2 + 3: חיפוש מוצרים ב-Supabase (RPC search_products).
+    דורש לפחות אחד מהפרמטרים q או category.
+    """
+    search_term = _sanitize_search_param(q)
+    category_filter = _sanitize_search_param(category)
+
+    if not search_term and not category_filter:
+        raise HTTPException(
+            status_code=400,
+            detail="יש להזין מילת חיפוש (q) או קטגוריה (category)",
+        )
+
+    products = _search_products_in_supabase(search_term, category_filter)
+    return ProductSearchResponse(products=products, count=len(products))
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -301,6 +489,333 @@ async def book_appointment(appointment: AppointmentCreate):
         raise he
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"שגיאה בתהליך קביעת התור: {str(e)}")
+
+
+# ==========================================
+# Add to Cart & View Cart
+# ==========================================
+
+@app.post("/api/cart/add")
+async def add_to_cart(payload: AddToCartRequest):
+    """
+    מוסיף מוצר לעגלה של המשתמש ב-Supabase.
+    אם המוצר כבר קיים בעגלה של אותו משתמש -> מעדכן את הכמות (מוסיף עליה).
+    אם המוצר לא קיים -> יוצר שורה חדשה.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+
+    try:
+        # 1. בדיקה האם המוצר כבר קיים בעגלה של המשתמש הספציפי הזה
+        existing_item = (
+            supabase.table("cart_items")
+            .select("*")
+            .eq("user_id", payload.user_id)
+            .eq("product_id", payload.product_id)
+            .execute()
+        )
+
+        if existing_item.data:
+            # המוצר כבר בעגלה -> נחשב את הכמות החדשה ונעדכן את השורה הקיימת
+            current_qty = existing_item.data[0]["quantity"]
+            new_qty = current_qty + payload.quantity
+            
+            response = (
+                supabase.table("cart_items")
+                .update({"quantity": new_qty})
+                .eq("id", existing_item.data[0]["id"])
+                .execute()
+            )
+            message = "כמות המוצר בעגלה עודכנה בהצלחה"
+        else:
+            # המוצר לא בעגלה -> נוסיף שורה חדשה לגמרי
+            data = {
+                "user_id": payload.user_id,
+                "product_id": payload.product_id,
+                "quantity": payload.quantity
+            }
+            response = supabase.table("cart_items").insert(data).execute()
+            message = "המוצר התווסף לעגלה בהצלחה"
+
+        return {"status": "success", "message": message, "data": response.data}
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"שגיאה בהוספת המוצר לעגלה: {str(e)}")
+
+
+@app.get("/api/admin/users", response_model=list[AdminUserOut])
+def list_admin_users(_admin=Depends(require_admin)):
+    """
+    Returns all users via the get_admin_users RPC (joins auth.users + public.profiles).
+    Requires a valid JWT and is_admin = true on the caller's profile.
+    """
+    supabase_admin = get_supabase_admin()
+
+    try:
+        response = supabase_admin.rpc("get_admin_users", {}).execute()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch admin users: {str(e)}",
+        ) from e
+
+    return response.data or []
+
+
+@app.put("/api/admin/users/{user_id}", response_model=AdminUserUpdateResponse)
+def update_admin_user(
+    user_id: str,
+    payload: AdminUserUpdateRequest,
+    _admin=Depends(require_admin),
+):
+    """
+    Updates a user's profile in public.profiles.
+    Requires a valid JWT and is_admin = true on the caller's profile.
+    """
+    supabase_admin = get_supabase_admin()
+
+    update_data = {
+        "first_name": payload.first_name.strip(),
+        "last_name": payload.last_name.strip(),
+        "phone": payload.phone.strip(),
+        "is_admin": payload.is_admin,
+    }
+
+    try:
+        response = (
+            supabase_admin.table("profiles")
+            .update(update_data)
+            .eq("id", user_id)
+            .execute()
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update user profile: {str(e)}",
+        ) from e
+
+    if not response.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+
+    return AdminUserUpdateResponse(
+        message="Profile updated successfully",
+        data=response.data[0],
+    )
+
+
+@app.delete("/api/admin/users/{user_id}", response_model=AdminUserDeleteResponse)
+def delete_admin_user(user_id: str, _admin=Depends(require_admin)):
+    """
+    Permanently deletes a user from Supabase Auth (and profiles via CASCADE if configured).
+    Requires a valid JWT and is_admin = true on the caller's profile.
+    """
+    supabase_admin = get_supabase_admin()
+
+    try:
+        supabase_admin.auth.admin.delete_user(user_id)
+    except Exception as auth_error:
+        # If FK blocks auth deletion, remove profile first then retry
+        try:
+            supabase_admin.table("profiles").delete().eq("id", user_id).execute()
+            supabase_admin.auth.admin.delete_user(user_id)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete user: {str(e)}",
+            ) from e
+
+    return AdminUserDeleteResponse(
+        message="User deleted successfully",
+        user_id=user_id,
+    )
+
+
+@app.get("/api/admin/orders")
+def list_admin_orders(_admin=Depends(require_admin)):
+    """
+    Returns all orders via the get_admin_orders RPC.
+    Requires a valid JWT and is_admin = true on the caller's profile.
+    """
+    supabase_admin = get_supabase_admin()
+
+    try:
+        response = supabase_admin.rpc("get_admin_orders", {}).execute()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch admin orders: {str(e)}",
+        ) from e
+
+    return response.data or []
+
+
+@app.put(
+    "/api/admin/orders/{order_id}/status",
+    response_model=AdminOrderStatusUpdateResponse,
+)
+def update_admin_order_status(
+    order_id: str,
+    payload: AdminOrderStatusUpdateRequest,
+    _admin=Depends(require_admin),
+):
+    """
+    Updates an order's status in public.cart_items.
+    Requires a valid JWT and is_admin = true on the caller's profile.
+    """
+    supabase_admin = get_supabase_admin()
+    new_status = payload.status.strip()
+
+    try:
+        response = (
+            supabase_admin.table("cart_items")
+            .update({"status": new_status})
+            .eq("id", order_id)
+            .execute()
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update order status: {str(e)}",
+        ) from e
+
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    return AdminOrderStatusUpdateResponse(
+        message="Order status updated successfully",
+        order_id=order_id,
+        data=response.data[0],
+    )
+
+
+@app.get("/api/cart")
+async def view_cart(user_id: str = Query(..., description="ID של המשתמש לצורך שליפת העגלה")):
+    """
+    שולף את כל הפריטים שנמצאים בעגלה של משתמש ספציפי מתוך Supabase.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+        
+    try:
+        response = supabase.table("cart_items").select("*").eq("user_id", user_id).execute()
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "cart_items": response.data,
+            "count": len(response.data)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"שגיאה בשליפת נתוני העגלה: {str(e)}")
+
+# ==========================================
+# Profile Management
+# ==========================================
+
+class ProfileUpdateRequest(BaseModel):
+    user_id: str
+    first_name: str
+    last_name: str
+    phone: str
+
+@app.put("/api/profile/update")
+async def update_profile(payload: ProfileUpdateRequest):
+    """
+    מקבל את הפרטים המעודכנים מהמשתמש ושומר אותם בטבלת profiles ב-Supabase.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+    
+    try:
+        # אלו הנתונים שנרצה לעדכן בטבלה
+        data_to_update = {
+            "first_name": payload.first_name.strip(),
+            "last_name": payload.last_name.strip(),
+            "phone": payload.phone.strip()
+        }
+        
+        # מבצעים Update לטבלת profiles במקום בו ה-id תואם למשתמש הנוכחי
+        response = (
+            supabase.table("profiles")
+            .update(data_to_update)
+            .eq("id", payload.user_id)
+            .execute()
+        )
+        
+        return {
+            "status": "success", 
+            "message": "הפרופיל עודכן בהצלחה", 
+            "data": response.data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"שגיאה בעדכון הפרופיל: {str(e)}")      
+    
+# ==========================================
+# (ספרינט 2 - Checkout)
+# ==========================================
+
+@app.post("/api/checkout")
+async def checkout(payload: CheckoutRequest):
+    """
+    ספרינט 2: ביצוע הזמנה ותשלום מאובטח אסינכרוני.
+    עומד בדרישות הבקלוג: ביצוע מהיר, הצפנה מאובטחת, ותמיכה בריבוי משתמשים בו-זמנית.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+
+    try:
+        # 1. דרישה: Securely Encrypted - נצפין את נתוני התשלום הרגישים שהגיעו מהפרונט
+        encrypted_payment_data = cipher_suite.encrypt(payload.card_token_or_raw.encode())
+        encrypted_payment_str = encrypted_payment_data.decode()
+
+        # 2. בניית האובייקט לשמירה בטבלת orders ב-Supabase
+        order_data = {
+            "client_uid": payload.user_id,
+            "client_name": payload.client_name,
+            "items": payload.items,  # נשמר כ-jsonb באופן אוטומטי
+            "total_price": payload.total_price,
+            "status": "paid",
+            "payment_method": payload.payment_method
+            # במידת הצורך תוכלי להוסיף עמודה בטבלה ולשמור את הטוקן המוצפן: "encrypted_token": encrypted_payment_str
+        }
+
+        # 3. שמירת ההזמנה בטבלת orders (מבוצע אסינכרונית ללא חסימת השרת)
+        response = supabase.table("orders").insert(order_data).execute()
+
+        # 4. ניקוי עגלת הקניות של המשתמש בבסיס הנתונים (cart_items) לאחר רכישה מוצלחת
+        try:
+            supabase.table("cart_items").delete().eq("user_id", payload.user_id).execute()
+        except Exception as cart_err:
+            print(f"Warning: Failed to clear backend cart: {str(cart_err)}")
+
+        return {
+            "status": "success",
+            "message": "התשלום בוצע וההזמנה נקלטה בהצלחה!",
+            "order_id": response.data[0]["id"] if response.data else None
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"שגיאה בתהליך התשלום: {str(e)}")  
+    
+    # ==========================================
+# שליפת הזמנות עבור משתמש ספציפי (Checkout ספרינט 2)
+# ==========================================
+@app.get("/api/orders")
+async def get_user_orders(user_id: str):
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+    
+    try:
+        # שינינו את descending=True ל- desc=True
+        response = supabase.table("orders") \
+            .select("*") \
+            .eq("client_uid", user_id) \
+            .order("created_at", desc=True) \
+            .execute()
+            
+        return response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"שגיאה בשליפת ההזמנות: {str(e)}")
 
 
 if __name__ == "__main__":
