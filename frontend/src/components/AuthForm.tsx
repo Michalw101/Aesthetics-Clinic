@@ -1,10 +1,11 @@
 import { useState, FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { LogIn, UserPlus, X, Mail, Lock, Phone, User } from 'lucide-react';
+import { LogIn, UserPlus, X, Mail, Lock, Phone, User, KeyRound } from 'lucide-react'; // <--- הוספתי את האייקון KeyRound
 import { cn } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 
-type AuthMode = 'login' | 'signup';
+// <--- הוספתי את מצב 'reset' לסוגי הטפסים האפשריים
+type AuthMode = 'login' | 'signup' | 'reset';
 
 interface AuthFormProps {
   onClose?: () => void;
@@ -46,7 +47,7 @@ export default function AuthForm({ onClose, onSuccess, initialMode = 'login' }: 
           return;
         }
         onSuccess?.();
-      } else {
+      } else if (mode === 'signup') {
         if (!firstName.trim() || !lastName.trim()) {
           setError('נא למלא שם פרטי ושם משפחה');
           return;
@@ -72,6 +73,22 @@ export default function AuthForm({ onClose, onSuccess, initialMode = 'login' }: 
           return;
         }
         setSuccessMessage('נרשמת בהצלחה! בדקי את תיבת האימייל לאישור החשבון.');
+      } else if (mode === 'reset') {
+        // <--- הלוגיקה החדשה של שליחת אימייל לאיפוס סיסמה
+        if (!email.trim()) {
+          setError('נא להזין כתובת אימייל');
+          return;
+        }
+        
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+          redirectTo: `${window.location.origin}/update-password`, // זה הראוט שניצור בהמשך
+        });
+        
+        if (resetError) {
+          setError(resetError.message);
+          return;
+        }
+        setSuccessMessage('קישור לאיפוס סיסמה נשלח לתיבת המייל שלך!');
       }
     } finally {
       setSubmitting(false);
@@ -111,15 +128,20 @@ export default function AuthForm({ onClose, onSuccess, initialMode = 'login' }: 
 
         <div className="bg-gradient-to-br from-brand-gold/10 via-white to-brand-beige px-8 pt-10 pb-6 text-center">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-gold/15 text-brand-gold">
-            {mode === 'login' ? <LogIn size={26} /> : <UserPlus size={26} />}
+            {/* <--- תצוגת אייקון משתנה בהתאם למצב */}
+            {mode === 'login' ? <LogIn size={26} /> : mode === 'signup' ? <UserPlus size={26} /> : <KeyRound size={26} />}
           </div>
           <h2 className="serif text-2xl font-semibold text-brand-dark">
-            {mode === 'login' ? 'ברוכה השבה' : 'הצטרפי אלינו'}
+            {/* <--- כותרת משתנה */}
+            {mode === 'login' ? 'ברוכה השבה' : mode === 'signup' ? 'הצטרפי אלינו' : 'שחזור סיסמה'}
           </h2>
           <p className="mt-1 text-sm text-brand-dark/60">
+            {/* <--- תיאור משתנה */}
             {mode === 'login'
               ? 'התחברי לחשבון שלך ב-Aesthetics Clinic'
-              : 'צרי חשבון חדש וקבלי גישה לכל השירותים'}
+              : mode === 'signup'
+              ? 'צרי חשבון חדש וקבלי גישה לכל השירותים'
+              : 'הזיני אימייל ונשלח לך קישור לאיפוס הסיסמה'}
           </p>
         </div>
 
@@ -208,20 +230,36 @@ export default function AuthForm({ onClose, onSuccess, initialMode = 'login' }: 
             />
           </div>
 
-          <div className="relative">
-            <Lock size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-brand-gold/60" />
-            <input
-              type="password"
-              placeholder="סיסמה"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={inputClass}
-              required
-              minLength={6}
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              dir="ltr"
-            />
-          </div>
+          {/* <--- שדה הסיסמה מוצג רק אם אנחנו לא במצב איפוס סיסמה */}
+          {mode !== 'reset' && (
+            <div className="relative">
+              <Lock size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-brand-gold/60" />
+              <input
+                type="password"
+                placeholder="סיסמה"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={inputClass}
+                required
+                minLength={6}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                dir="ltr"
+              />
+            </div>
+          )}
+
+          {/* <--- הוספת לינק "שכחתי סיסמה" רק במסך התחברות */}
+          {mode === 'login' && (
+            <div className="flex justify-start px-1">
+              <button
+                type="button"
+                onClick={() => switchMode('reset')}
+                className="text-xs font-semibold text-brand-gold hover:text-brand-dark transition-colors"
+              >
+                שכחת סיסמה?
+              </button>
+            </div>
+          )}
 
           {error && (
             <motion.div
@@ -246,17 +284,19 @@ export default function AuthForm({ onClose, onSuccess, initialMode = 'login' }: 
           <button
             type="submit"
             disabled={submitting}
-            className="w-full rounded-xl bg-brand-gold py-3.5 text-sm font-bold text-white shadow-md transition-all hover:bg-brand-gold/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="w-full rounded-xl bg-brand-gold py-3.5 text-sm font-bold text-white shadow-md transition-all hover:bg-brand-gold/90 disabled:cursor-not-allowed disabled:opacity-60 mt-2"
           >
             {submitting ? (
               <span className="inline-flex items-center gap-2">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                {mode === 'login' ? 'מתחברת...' : 'נרשמת...'}
+                {mode === 'login' ? 'מתחברת...' : mode === 'signup' ? 'נרשמת...' : 'שולח...'}
               </span>
             ) : mode === 'login' ? (
               'התחברי'
-            ) : (
+            ) : mode === 'signup' ? (
               'הירשמי'
+            ) : (
+              'שלחי קישור לאיפוס'
             )}
           </button>
         </form>

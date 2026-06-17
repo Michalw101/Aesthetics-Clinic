@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Send, User, Sparkles, Calendar, ShoppingBag, Info, Menu, X, 
+import {
+  Send, User, Sparkles, Calendar, ShoppingBag, Info, Menu, X,
   MessageCircle, ArrowLeft, Star, Clock, MapPin, Phone, Instagram, Facebook,
   LogIn, UserPlus, LogOut, CheckCircle2, Shield, Package, Users, Trash2, Edit3
 } from 'lucide-react';
@@ -16,7 +16,8 @@ import StorePage from './pages/StorePage';
 import { formatDisplayDate } from './lib/format';
 import { useCart } from "./hooks/useCart";
 import { supabase } from './lib/supabase';
-import { sendCheckoutToBackend, fetchUserOrdersFromBackend } from './lib/api'; 
+import { sendCheckoutToBackend, fetchUserOrdersFromBackend } from './lib/api';
+import UpdatePassword from './components/UpdatePassword';
 
 type Page = 'home' | 'consultation' | 'treatments' | 'booking' | 'store' | 'profile' | 'admin' | 'blog';
 
@@ -33,10 +34,23 @@ interface UserData {
 export default function App() {
   const { user, profile, loading: authLoading, logout, isAdmin, authError } = useAuth();
   const [showAuthForm, setShowAuthForm] = useState(false);
-  const { 
-    products, appointments, allScheduledAppointments, blogPosts, orders, 
+  const [showUpdatePassword, setShowUpdatePassword] = useState(false);
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        // כשהלקוחה חוזרת מהמייל, נפתח את החלונית להזנת סיסמה
+        setShowUpdatePassword(true);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const {
+    products, appointments, allScheduledAppointments, blogPosts, orders,
     reviews, treatments,
-    bookAppointment, updateAppointmentStatus, 
+    bookAppointment, updateAppointmentStatus,
     placeOrder, updateOrderStatus, addBlogPost, deleteBlogPost,
     addReview, updateReviewStatus, deleteReview, addTreatment, deleteTreatment
   } = useClinicData(user?.uid);
@@ -108,62 +122,62 @@ export default function App() {
     window.scrollTo(0, 0);
   };
 
- const handlePlaceOrder = async () => {
-  // 1. בדיקת התחברות 
-  if (!user) {
-    toast.error("אנא התחברי כדי לבצע הזמנה", { position: "top-center" });
-    setShowAuthForm(true);
-    return;
-  }
-  if (cart.length === 0) return;
-
-  // 2. חישוב הסכום הכולל)
-  const totalPrice = cart.reduce((sum, item) => {
-    const price =
-      typeof item.price === "string"
-        ? parseFloat(item.price.replace("₪", ""))
-        : item.price;
-    const qty = item.quantity || 1;
-    return sum + price * qty;
-  }, 0);
-
-  // 3. הכנת הנתונים החדשים לטובת ה-Checkout המאובטח בבאקנד
-  const checkoutParams = {
-    userId: user.uid, // משתמש ב-UID של המשתמש המחובר שלך
-    clientName: profile?.name || "User", // משתמש בשם מהפרופיל שלך
-    items: cart.map(item => ({
-      product_id: item.product_id || item.id,
-      name: item.name,
-      quantity: item.quantity || 1,
-      price: typeof item.price === "string" ? parseFloat(item.price.replace("₪", "")) : item.price,
-      img: item.img || item.imageUrl || item.image || "",
-    })),
-    totalPrice: totalPrice,
-    paymentMethod: "credit_card",
-    cardTokenOrRaw: "tok_visa_12345_encrypted_simulation" // הנתון הרגיש שיעבור הצפנה ב-FastAPI
-  };
-
-  try {
-    toast.loading("מבצע תשלום מאובטח...", { id: "checkout", position: "top-center" });
-
-    const result = await sendCheckoutToBackend(checkoutParams);
-
-    if (result.status === "success") {
-      clearCart();
-      
-      toast.success("ההזמנה בוצעה בהצלחה! התשלום אושר ומאובטח בהצפנה.", {
-        id: "checkout",
-        position: "top-center",
-        duration: 4000
-      });
-      
-      navigateTo("profile");
+  const handlePlaceOrder = async () => {
+    // 1. בדיקת התחברות 
+    if (!user) {
+      toast.error("אנא התחברי כדי לבצע הזמנה", { position: "top-center" });
+      setShowAuthForm(true);
+      return;
     }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : "חלה שגיאה בביצוע ההזמנה. אנא נסי שוב.";
-    toast.error(msg, { id: "checkout", position: "top-center" });
-  }
-};
+    if (cart.length === 0) return;
+
+    // 2. חישוב הסכום הכולל)
+    const totalPrice = cart.reduce((sum, item) => {
+      const price =
+        typeof item.price === "string"
+          ? parseFloat(item.price.replace("₪", ""))
+          : item.price;
+      const qty = item.quantity || 1;
+      return sum + price * qty;
+    }, 0);
+
+    // 3. הכנת הנתונים החדשים לטובת ה-Checkout המאובטח בבאקנד
+    const checkoutParams = {
+      userId: user.uid, // משתמש ב-UID של המשתמש המחובר שלך
+      clientName: profile?.name || "User", // משתמש בשם מהפרופיל שלך
+      items: cart.map(item => ({
+        product_id: item.product_id || item.id,
+        name: item.name,
+        quantity: item.quantity || 1,
+        price: typeof item.price === "string" ? parseFloat(item.price.replace("₪", "")) : item.price,
+        img: item.img || item.imageUrl || item.image || "",
+      })),
+      totalPrice: totalPrice,
+      paymentMethod: "credit_card",
+      cardTokenOrRaw: "tok_visa_12345_encrypted_simulation" // הנתון הרגיש שיעבור הצפנה ב-FastAPI
+    };
+
+    try {
+      toast.loading("מבצע תשלום מאובטח...", { id: "checkout", position: "top-center" });
+
+      const result = await sendCheckoutToBackend(checkoutParams);
+
+      if (result.status === "success") {
+        clearCart();
+
+        toast.success("ההזמנה בוצעה בהצלחה! התשלום אושר ומאובטח בהצפנה.", {
+          id: "checkout",
+          position: "top-center",
+          duration: 4000
+        });
+
+        navigateTo("profile");
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "חלה שגיאה בביצוע ההזמנה. אנא נסי שוב.";
+      toast.error(msg, { id: "checkout", position: "top-center" });
+    }
+  };
 
   if (authLoading) {
     return (
@@ -185,11 +199,20 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+      <AnimatePresence>
+        {showUpdatePassword && (
+          <UpdatePassword
+            key="update-password-form"
+            onClose={() => setShowUpdatePassword(false)}
+            onSuccess={() => setShowUpdatePassword(false)}
+          />
+        )}
+      </AnimatePresence>
       {/* Navigation Bar */}
       <nav className="fixed top-0 left-0 right-0 z-40 bg-white/80 backdrop-blur-md border-b border-brand-gold/10 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 
+            <h1
               className="text-2xl serif font-semibold tracking-wide text-brand-gold cursor-pointer"
               onClick={() => navigateTo('home')}
             >
@@ -209,15 +232,15 @@ export default function App() {
               )}
             </div>
           </div>
-          
+
           <div className="flex items-center gap-4">
             {cart.length > 0 && (
-              <button 
+              <button
                 onClick={() => setIsCartOpen(true)}
                 className="relative p-2 text-brand-dark hover:text-brand-gold transition-colors"
               >
                 <ShoppingBag size={22} />
-                 <span className="absolute -top-1 -right-1 bg-brand-gold text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-sm">
+                <span className="absolute -top-1 -right-1 bg-brand-gold text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-sm">
                   {cart.reduce(
                     (total, item) => total + (item.quantity || 1),
                     0,
@@ -227,13 +250,13 @@ export default function App() {
             )}
             {user ? (
               <div className="flex items-center gap-3">
-                <button 
+                <button
                   onClick={() => navigateTo('profile')}
                   className={cn("text-xs font-bold hover:text-brand-gold transition-colors hidden sm:inline", currentPage === 'profile' ? "text-brand-gold" : "text-brand-dark/60")}
                 >
                   שלום, {profile?.name || 'משתמשת'}
                 </button>
-                <button 
+                <button
                   onClick={logout}
                   className="p-2 rounded-full hover:bg-brand-beige text-brand-dark transition-colors"
                   title="התנתקות"
@@ -242,7 +265,7 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <button 
+              <button
                 onClick={() => setShowAuthForm(true)}
                 className="flex items-center gap-2 text-sm font-bold text-brand-gold hover:text-brand-gold/80 transition-colors"
               >
@@ -250,7 +273,7 @@ export default function App() {
                 <span className="hidden sm:inline">התחברות</span>
               </button>
             )}
-            <button 
+            <button
               onClick={() => navigateTo('booking')}
               className="bg-brand-gold text-white px-6 py-2 rounded-full text-sm font-semibold hover:bg-brand-gold/90 transition-all shadow-md"
             >
@@ -265,30 +288,30 @@ export default function App() {
         <AnimatePresence mode="wait">
           {currentPage === 'home' && <HomePage key="home" onNavigate={navigateTo} />}
           {currentPage === 'treatments' && (
-            <TreatmentsPage 
-              key="treatments" 
-              treatments={treatments} 
-              reviews={reviews} 
-              user={user} 
-              profile={profile} 
-              onAddReview={addReview} 
+            <TreatmentsPage
+              key="treatments"
+              treatments={treatments}
+              reviews={reviews}
+              user={user}
+              profile={profile}
+              onAddReview={addReview}
             />
           )}
           {currentPage === 'store' && (
-            <StorePage 
-              key="store" 
-              onAddToCart={addToCart} 
-              cartCount={cart.length} 
+            <StorePage
+              key="store"
+              onAddToCart={addToCart}
+              cartCount={cart.length}
               onCheckout={handlePlaceOrder}
             />
           )}
           {currentPage === 'booking' && (
-            <BookingPage 
-              key="booking" 
-              onBook={bookAppointment} 
-              user={user} 
-              profile={profile} 
-              onNavigate={navigateTo} 
+            <BookingPage
+              key="booking"
+              onBook={bookAppointment}
+              user={user}
+              profile={profile}
+              onNavigate={navigateTo}
               allScheduledAppointments={allScheduledAppointments}
             />
           )}
@@ -296,10 +319,10 @@ export default function App() {
           {currentPage === 'consultation' && <ConsultationPage key="consultation" onOpenAssistant={() => setIsAssistantOpen(true)} />}
           {currentPage === 'profile' && <ProfilePage key="profile" profile={profile} appointments={appointments} orders={orders} onCancelAppointment={(id) => updateAppointmentStatus(id, 'cancelled')} />}
           {currentPage === 'admin' && isAdmin && (
-            <AdminDashboard 
-              key="admin" 
-              appointments={appointments} 
-              orders={orders} 
+            <AdminDashboard
+              key="admin"
+              appointments={appointments}
+              orders={orders}
               products={products}
               blogPosts={blogPosts}
               reviews={reviews}
@@ -355,7 +378,7 @@ export default function App() {
       </footer>
 
       {/* Floating Assistant Button */}
-      <button 
+      <button
         onClick={() => {
           setIsAssistantOpen(true);
           setHasNewMessage(false);
@@ -475,7 +498,7 @@ export default function App() {
       <AnimatePresence>
         {isAssistantOpen && (
           <div className="fixed inset-0 z-50 flex items-end justify-start p-4 pb-6 md:px-8 md:pt-8 md:pb-8 pointer-events-none">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -506,8 +529,8 @@ export default function App() {
                   <div key={idx} className={cn("flex", msg.role === 'user' ? "justify-start" : "justify-end")}>
                     <div className={cn(
                       "max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed",
-                      msg.role === 'user' 
-                        ? "bg-brand-gold text-white rounded-tr-none" 
+                      msg.role === 'user'
+                        ? "bg-brand-gold text-white rounded-tr-none"
                         : "bg-white text-brand-dark border border-brand-gold/10 rounded-tl-none shadow-sm"
                     )}>
                       <ReactMarkdown>{msg.text}</ReactMarkdown>
@@ -557,24 +580,24 @@ export default function App() {
 
 function HomePage({ onNavigate }: { onNavigate: (page: Page) => void }) {
   return (
-    <motion.div 
-      initial={{ opacity: 0 }} 
-      animate={{ opacity: 1 }} 
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="space-y-20"
     >
       {/* Hero Section */}
       <section className="relative h-[80vh] flex items-center justify-center overflow-hidden">
         <div className="absolute inset-0 z-0">
-          <img 
-            src="https://images.unsplash.com/photo-1570172619380-41067eeec9d2?auto=format&fit=crop&q=80&w=1920" 
-            alt="Clinic Interior" 
+          <img
+            src="https://images.unsplash.com/photo-1570172619380-41067eeec9d2?auto=format&fit=crop&q=80&w=1920"
+            alt="Clinic Interior"
             className="w-full h-full object-cover opacity-40"
             referrerPolicy="no-referrer"
           />
           <div className="absolute inset-0 bg-gradient-to-b from-brand-beige/80 via-transparent to-brand-beige" />
         </div>
-        
+
         <div className="relative z-10 text-center space-y-8 px-6 max-w-4xl">
           <motion.div
             initial={{ y: 30, opacity: 0 }}
@@ -585,7 +608,7 @@ function HomePage({ onNavigate }: { onNavigate: (page: Page) => void }) {
               יופי שמתחיל <br /> <span className="text-brand-gold italic">מבפנים</span>
             </h2>
           </motion.div>
-          <motion.p 
+          <motion.p
             initial={{ y: 30, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ delay: 0.4 }}
@@ -593,19 +616,19 @@ function HomePage({ onNavigate }: { onNavigate: (page: Page) => void }) {
           >
             קליניקת Aesthetics מציעה את הטיפולים המתקדמים ביותר בעולם האסתטיקה, בשילוב טכנולוגיה חדשנית ויחס אישי לכל מטופלת.
           </motion.p>
-          <motion.div 
+          <motion.div
             initial={{ y: 30, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ delay: 0.6 }}
             className="flex flex-wrap justify-center gap-4"
           >
-            <button 
+            <button
               onClick={() => onNavigate('booking')}
               className="bg-brand-dark text-white px-10 py-4 rounded-full text-sm font-bold uppercase tracking-widest hover:bg-brand-gold transition-all shadow-xl"
             >
               הזמיני תור עכשיו
             </button>
-            <button 
+            <button
               onClick={() => onNavigate('treatments')}
               className="bg-white border border-brand-gold text-brand-gold px-10 py-4 rounded-full text-sm font-bold uppercase tracking-widest hover:bg-brand-gold hover:text-white transition-all shadow-lg"
             >
@@ -684,9 +707,9 @@ function TreatmentsPage({ treatments: clinicTreatments, reviews, user, profile, 
     const treatmentReviews = reviews.filter(r => r.treatmentId === treatmentName && r.status === 'approved');
     if (treatmentReviews.length === 0) return { rating: 5.0, count: 0 };
     const sum = treatmentReviews.reduce((acc, r) => acc + r.rating, 0);
-    return { 
-      rating: (sum / treatmentReviews.length).toFixed(1), 
-      count: treatmentReviews.length 
+    return {
+      rating: (sum / treatmentReviews.length).toFixed(1),
+      count: treatmentReviews.length
     };
   };
 
@@ -729,9 +752,9 @@ function TreatmentsPage({ treatments: clinicTreatments, reviews, user, profile, 
                 </div>
                 <h3 className="text-2xl serif font-medium text-brand-gold">{t.name}</h3>
                 <p className="text-brand-dark/60">{t.desc || t.description}</p>
-                
+
                 <div className="pt-4 flex flex-wrap justify-center md:justify-start gap-4">
-                  <button 
+                  <button
                     onClick={() => setSelectedTreatment(t)}
                     className="text-xs font-bold uppercase tracking-widest text-brand-gold hover:underline"
                   >
@@ -754,7 +777,7 @@ function TreatmentsPage({ treatments: clinicTreatments, reviews, user, profile, 
       <AnimatePresence>
         {selectedTreatment && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -768,9 +791,9 @@ function TreatmentsPage({ treatments: clinicTreatments, reviews, user, profile, 
               <div className="space-y-4">
                 <div className="flex justify-center gap-2">
                   {[1, 2, 3, 4, 5].map((star) => (
-                    <button 
-                      key={star} 
-                      onClick={() => setReviewForm({...reviewForm, rating: star})}
+                    <button
+                      key={star}
+                      onClick={() => setReviewForm({ ...reviewForm, rating: star })}
                       className={cn("transition-transform hover:scale-110", reviewForm.rating >= star ? "text-brand-gold" : "text-gray-200")}
                     >
                       <Star size={32} fill={reviewForm.rating >= star ? "currentColor" : "none"} />
@@ -778,22 +801,22 @@ function TreatmentsPage({ treatments: clinicTreatments, reviews, user, profile, 
                   ))}
                 </div>
 
-                <textarea 
+                <textarea
                   placeholder="ספרי לנו על החוויה שלך..."
                   value={reviewForm.comment}
-                  onChange={(e) => setReviewForm({...reviewForm, comment: e.target.value})}
+                  onChange={(e) => setReviewForm({ ...reviewForm, comment: e.target.value })}
                   className="w-full bg-brand-beige/30 border border-brand-gold/20 rounded-2xl p-4 h-32 focus:outline-none focus:ring-2 focus:ring-brand-gold/30 resize-none"
                 />
               </div>
 
               <div className="flex gap-4">
-                <button 
+                <button
                   onClick={handleReviewSubmit}
                   className="flex-1 bg-brand-gold text-white py-3 rounded-xl font-bold uppercase tracking-widest hover:bg-brand-gold/90 transition-all"
                 >
                   שלחי ביקורת
                 </button>
-                <button 
+                <button
                   onClick={() => setSelectedTreatment(null)}
                   className="flex-1 bg-brand-beige text-brand-dark py-3 rounded-xl font-bold uppercase tracking-widest hover:bg-brand-beige/80 transition-all"
                 >
@@ -849,9 +872,9 @@ function BookingPage({ onBook, user, profile, onNavigate, allScheduledAppointmen
       <div className="bg-white p-8 rounded-3xl border border-brand-gold/10 shadow-xl space-y-6">
         <div className="space-y-4">
           <label className="block text-sm font-bold uppercase tracking-widest text-brand-gold">בחרי טיפול</label>
-          <select 
+          <select
             value={bookingData.treatment}
-            onChange={(e) => setBookingData({...bookingData, treatment: e.target.value})}
+            onChange={(e) => setBookingData({ ...bookingData, treatment: e.target.value })}
             className="w-full bg-brand-beige/30 border border-brand-gold/20 rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-brand-gold/30"
           >
             <option>טיפול פנים קלאסי</option>
@@ -863,19 +886,19 @@ function BookingPage({ onBook, user, profile, onNavigate, allScheduledAppointmen
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-4">
             <label className="block text-sm font-bold uppercase tracking-widest text-brand-gold">תאריך</label>
-            <input 
-              type="date" 
+            <input
+              type="date"
               min={new Date().toISOString().split('T')[0]}
               value={bookingData.date}
-              onChange={(e) => setBookingData({...bookingData, date: e.target.value, time: ''})}
-              className="w-full bg-brand-beige/30 border border-brand-gold/20 rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-brand-gold/30" 
+              onChange={(e) => setBookingData({ ...bookingData, date: e.target.value, time: '' })}
+              className="w-full bg-brand-beige/30 border border-brand-gold/20 rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-brand-gold/30"
             />
           </div>
           <div className="space-y-4">
             <label className="block text-sm font-bold uppercase tracking-widest text-brand-gold">שעה</label>
-            <select 
+            <select
               value={bookingData.time}
-              onChange={(e) => setBookingData({...bookingData, time: e.target.value})}
+              onChange={(e) => setBookingData({ ...bookingData, time: e.target.value })}
               disabled={!bookingData.date}
               className="w-full bg-brand-beige/30 border border-brand-gold/20 rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-brand-gold/30 disabled:opacity-50"
             >
@@ -892,7 +915,7 @@ function BookingPage({ onBook, user, profile, onNavigate, allScheduledAppointmen
             </select>
           </div>
         </div>
-        <button 
+        <button
           onClick={handleSubmit}
           disabled={!bookingData.date || !bookingData.time}
           className="w-full bg-brand-gold text-white py-4 rounded-xl font-bold uppercase tracking-widest hover:bg-brand-gold/90 transition-all shadow-lg disabled:opacity-50"
@@ -922,7 +945,7 @@ function ProfilePage({ profile, appointments, orders, onCancelAppointment }: { p
     try {
       // במקום לקרוא לטבלה, אנחנו קוראים ישירות לנתוני ההתחברות المאובטחים של המשתמשת
       const { data: { user } } = await supabase.auth.getUser();
-      
+
       if (user) {
         const meta = user.user_metadata || {};
         setEditForm({
@@ -947,7 +970,7 @@ function ProfilePage({ profile, appointments, orders, onCancelAppointment }: { p
     setIsSubmitting(true);
     try {
       const backendUrl = import.meta.env.VITE_DEV_BACKEND_URL || 'http://127.0.0.1:8000';
-      
+
       // 1. שולחים לשרת (אם יעבוד או ייחסם באבטחה, זה לא יפגע לנו בתצוגה)
       await fetch(`${backendUrl}/api/profile/update`, {
         method: 'PUT',
@@ -972,7 +995,7 @@ function ProfilePage({ profile, appointments, orders, onCancelAppointment }: { p
       toast.success('הפרופיל עודכן בהצלחה!', { position: 'top-center' });
       setIsEditing(false);
       // הורדנו את ה-reload! ריאקט כבר תעדכן את המסך לבד בצורה חלקה
-      
+
     } catch (error) {
       toast.error('חלה שגיאה בשמירת הנתונים. אנא נסי שוב.', { position: 'top-center' });
     } finally {
@@ -995,9 +1018,9 @@ function ProfilePage({ profile, appointments, orders, onCancelAppointment }: { p
             </div>
           </div>
         </div>
-        
+
         {/* כפתור פתיחת עריכת פרופיל */}
-        <button 
+        <button
           onClick={handleEditClick}
           className="flex items-center gap-2 bg-brand-beige text-brand-dark px-6 py-3 rounded-xl font-bold hover:bg-brand-gold hover:text-white transition-colors border border-brand-gold/20"
         >
@@ -1010,7 +1033,7 @@ function ProfilePage({ profile, appointments, orders, onCancelAppointment }: { p
       <AnimatePresence>
         {isEditing && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -1020,32 +1043,32 @@ function ProfilePage({ profile, appointments, orders, onCancelAppointment }: { p
                 <h3 className="text-2xl serif font-semibold text-brand-dark">עריכת פרטים אישיים</h3>
                 <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-brand-beige rounded-full transition-colors text-brand-dark/60"><X size={20} /></button>
               </div>
-              
+
               <div className="space-y-4">
                 <div className="space-y-1">
                   <label className="text-xs font-bold uppercase tracking-widest text-brand-gold">שם פרטי</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={editForm.firstName}
-                    onChange={(e) => setEditForm({...editForm, firstName: e.target.value})}
+                    onChange={(e) => setEditForm({ ...editForm, firstName: e.target.value })}
                     className="w-full p-3 rounded-xl border border-brand-gold/20 focus:outline-none focus:ring-2 focus:ring-brand-gold/30 bg-brand-beige/30 text-sm"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold uppercase tracking-widest text-brand-gold">שם משפחה</label>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     value={editForm.lastName}
-                    onChange={(e) => setEditForm({...editForm, lastName: e.target.value})}
+                    onChange={(e) => setEditForm({ ...editForm, lastName: e.target.value })}
                     className="w-full p-3 rounded-xl border border-brand-gold/20 focus:outline-none focus:ring-2 focus:ring-brand-gold/30 bg-brand-beige/30 text-sm"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold uppercase tracking-widest text-brand-gold">טלפון</label>
-                  <input 
-                    type="tel" 
+                  <input
+                    type="tel"
                     value={editForm.phone}
-                    onChange={(e) => setEditForm({...editForm, phone: e.target.value})}
+                    onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
                     className="w-full p-3 rounded-xl border border-brand-gold/20 focus:outline-none focus:ring-2 focus:ring-brand-gold/30 bg-brand-beige/30 text-sm"
                     dir="ltr"
                     placeholder="05X-XXXXXXX"
@@ -1053,7 +1076,7 @@ function ProfilePage({ profile, appointments, orders, onCancelAppointment }: { p
                 </div>
               </div>
 
-              <button 
+              <button
                 onClick={handleSaveProfile}
                 disabled={isSubmitting}
                 className="w-full bg-brand-gold text-white py-4 rounded-xl font-bold uppercase tracking-widest hover:bg-brand-gold/90 transition-all shadow-lg disabled:opacity-50 mt-4"
@@ -1087,7 +1110,7 @@ function ProfilePage({ profile, appointments, orders, onCancelAppointment }: { p
                     </span>
                   </div>
                   {app.status === 'scheduled' && (
-                    <button 
+                    <button
                       onClick={() => onCancelAppointment(app.id)}
                       className="text-red-500 hover:bg-red-50 p-2 rounded-full transition-colors"
                     >
@@ -1101,70 +1124,70 @@ function ProfilePage({ profile, appointments, orders, onCancelAppointment }: { p
         </div>
 
         <div className="space-y-6">
-  <h3 className="text-2xl serif font-semibold flex items-center gap-2">
-    <ShoppingBag size={20} className="text-brand-gold" /> ההזמנות שלי
-  </h3>
-  <div className="space-y-4">
-    {orders.length === 0 ? (
-      <p className="text-brand-dark/40 italic">אין הזמנות קודמות</p>
-    ) : (
-      orders.map((order) => (
-        <div key={order.id} className="bg-white p-6 rounded-2xl border border-brand-gold/10 space-y-4">
-          <div className="flex justify-between items-start">
-            <div>
-              <h4 className="font-bold">הזמנה #{order.id.slice(-6)}</h4>
-              <p className="text-xs text-brand-dark/60">סה"כ: ₪{order.totalPrice}</p>
-              
-              {/* 🌟 הוספת תאריך ההזמנה */}
-              {order.createdAt && (
-                <p className="text-[11px] text-brand-dark/40 mt-1">
-                  תאריך: {new Date(order.createdAt).toLocaleDateString('he-IL')} בשעה {new Date(order.createdAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
-                </p>
-              )}
-            </div>
-            <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-green-100 text-green-700 rounded-full">
-              {order.status === 'pending' ? 'בטיפול' : order.status === 'paid' ? 'שולם' : order.status}
-            </span>
-          </div>
+          <h3 className="text-2xl serif font-semibold flex items-center gap-2">
+            <ShoppingBag size={20} className="text-brand-gold" /> ההזמנות שלי
+          </h3>
+          <div className="space-y-4">
+            {orders.length === 0 ? (
+              <p className="text-brand-dark/40 italic">אין הזמנות קודמות</p>
+            ) : (
+              orders.map((order) => (
+                <div key={order.id} className="bg-white p-6 rounded-2xl border border-brand-gold/10 space-y-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="font-bold">הזמנה #{order.id.slice(-6)}</h4>
+                      <p className="text-xs text-brand-dark/60">סה"כ: ₪{order.totalPrice}</p>
 
-          {/* תצוגת תמונות המוצרים */}
-          <div className="flex gap-2 overflow-x-auto pb-2">
-            {order.items && order.items.map((item: any, i: number) => {
-              // 🌟 מוודא שהקוד תופס גם img וגם imageUrl למניעת באגים
-              const itemImage = item.img || item.imageUrl || item.image || "https://via.placeholder.com/150";
-              
-              return (
-                <div key={i} className="group relative w-12 h-12 rounded-lg bg-brand-beige overflow-hidden flex-shrink-0 border border-brand-gold/5">
-                  <img 
-                    src={itemImage} 
-                    alt={item.name}
-                    className="w-full h-full object-cover transition-transform group-hover:scale-110" 
-                    onError={(e) => {
-                      // אם הלינק לתמונה שבור, נשים תמונת פלבאק
-                      (e.target as HTMLImageElement).src = "https://via.placeholder.com/150";
-                    }}
-                  />
-                  {/* בבלון קטן כשעומדים על התמונה - יראו את כמות הפריטים מהמוצר הזה */}
-                  {item.quantity > 1 && (
-                    <span className="absolute bottom-0 right-0 bg-brand-gold text-white text-[9px] font-bold px-1 rounded-tl">
-                      x{item.quantity}
+                      {/* 🌟 הוספת תאריך ההזמנה */}
+                      {order.createdAt && (
+                        <p className="text-[11px] text-brand-dark/40 mt-1">
+                          תאריך: {new Date(order.createdAt).toLocaleDateString('he-IL')} בשעה {new Date(order.createdAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 bg-green-100 text-green-700 rounded-full">
+                      {order.status === 'pending' ? 'בטיפול' : order.status === 'paid' ? 'שולם' : order.status}
                     </span>
-                  )}
+                  </div>
+
+                  {/* תצוגת תמונות המוצרים */}
+                  <div className="flex gap-2 overflow-x-auto pb-2">
+                    {order.items && order.items.map((item: any, i: number) => {
+                      // 🌟 מוודא שהקוד תופס גם img וגם imageUrl למניעת באגים
+                      const itemImage = item.img || item.imageUrl || item.image || "https://via.placeholder.com/150";
+
+                      return (
+                        <div key={i} className="group relative w-12 h-12 rounded-lg bg-brand-beige overflow-hidden flex-shrink-0 border border-brand-gold/5">
+                          <img
+                            src={itemImage}
+                            alt={item.name}
+                            className="w-full h-full object-cover transition-transform group-hover:scale-110"
+                            onError={(e) => {
+                              // אם הלינק לתמונה שבור, נשים תמונת פלבאק
+                              (e.target as HTMLImageElement).src = "https://via.placeholder.com/150";
+                            }}
+                          />
+                          {/* בבלון קטן כשעומדים על התמונה - יראו את כמות הפריטים מהמוצר הזה */}
+                          {item.quantity > 1 && (
+                            <span className="absolute bottom-0 right-0 bg-brand-gold text-white text-[9px] font-bold px-1 rounded-tl">
+                              x{item.quantity}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              );
-            })}
+              ))
+            )}
           </div>
         </div>
-      ))
-    )}
-  </div>
-</div>
       </div>
     </motion.div>
   );
 }
 
-function AdminDashboard({ 
+function AdminDashboard({
   appointments, orders, products, blogPosts, reviews, treatments,
   onUpdateAppointment, onUpdateOrder, onAddBlogPost, onDeleteBlogPost,
   onUpdateReview, onDeleteReview, onAddTreatment, onDeleteTreatment
@@ -1255,7 +1278,7 @@ function AdminDashboard({
                     <td className="p-6 text-sm">{order.items.length} פריטים</td>
                     <td className="p-6 font-bold">₪{order.totalPrice}</td>
                     <td className="p-6">
-                      <select 
+                      <select
                         value={order.status}
                         onChange={(e) => onUpdateOrder(order.id, e.target.value)}
                         className="bg-brand-beige/30 border border-brand-gold/20 rounded-lg p-1 text-xs"
@@ -1302,21 +1325,21 @@ function AdminDashboard({
           <div className="p-8 space-y-8">
             <div className="bg-brand-beige/30 p-6 rounded-3xl space-y-4">
               <h3 className="text-xl font-bold">פוסט חדש</h3>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 placeholder="כותרת הפוסט"
                 value={newPost.title}
-                onChange={(e) => setNewPost({...newPost, title: e.target.value})}
+                onChange={(e) => setNewPost({ ...newPost, title: e.target.value })}
                 className="w-full p-4 rounded-xl border border-brand-gold/20 focus:outline-none focus:ring-2 focus:ring-brand-gold/30"
               />
-              <textarea 
+              <textarea
                 placeholder="תוכן הפוסט..."
                 rows={4}
                 value={newPost.content}
-                onChange={(e) => setNewPost({...newPost, content: e.target.value})}
+                onChange={(e) => setNewPost({ ...newPost, content: e.target.value })}
                 className="w-full p-4 rounded-xl border border-brand-gold/20 focus:outline-none focus:ring-2 focus:ring-brand-gold/30"
               />
-              <button 
+              <button
                 onClick={handleAddPost}
                 className="bg-brand-gold text-white px-8 py-3 rounded-full font-bold shadow-lg hover:scale-105 transition-transform"
               >
@@ -1332,7 +1355,7 @@ function AdminDashboard({
                     <h4 className="font-bold">{post.title}</h4>
                     <p className="text-xs text-brand-dark/60">{formatDisplayDate(post.createdAt)}</p>
                   </div>
-                  <button 
+                  <button
                     onClick={() => onDeleteBlogPost(post.id)}
                     className="text-red-500 hover:bg-red-50 p-2 rounded-full transition-colors"
                   >
@@ -1394,22 +1417,22 @@ function AdminDashboard({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-4">
                 <h3 className="text-xl serif font-semibold">טיפול חדש</h3>
-                <input 
-                  placeholder="שם הטיפול" 
+                <input
+                  placeholder="שם הטיפול"
                   value={newTreatment.name}
-                  onChange={(e) => setNewTreatment({...newTreatment, name: e.target.value})}
+                  onChange={(e) => setNewTreatment({ ...newTreatment, name: e.target.value })}
                   className="w-full bg-brand-beige/30 border border-brand-gold/20 rounded-xl p-4"
                 />
-                <textarea 
-                  placeholder="תיאור" 
+                <textarea
+                  placeholder="תיאור"
                   value={newTreatment.description}
-                  onChange={(e) => setNewTreatment({...newTreatment, description: e.target.value})}
+                  onChange={(e) => setNewTreatment({ ...newTreatment, description: e.target.value })}
                   className="w-full bg-brand-beige/30 border border-brand-gold/20 rounded-xl p-4 h-32"
                 />
-                <input 
-                  placeholder="מחיר (₪)" 
+                <input
+                  placeholder="מחיר (₪)"
                   value={newTreatment.price}
-                  onChange={(e) => setNewTreatment({...newTreatment, price: e.target.value})}
+                  onChange={(e) => setNewTreatment({ ...newTreatment, price: e.target.value })}
                   className="w-full bg-brand-beige/30 border border-brand-gold/20 rounded-xl p-4"
                 />
                 <button onClick={handleAddTreatment} className="w-full bg-brand-gold text-white py-4 rounded-xl font-bold uppercase tracking-widest">הוסיפי טיפול</button>
@@ -1512,7 +1535,7 @@ function ConsultationPage({ onOpenAssistant }: { onOpenAssistant: () => void }) 
             <li className="flex items-center gap-2 text-brand-gold"><Sparkles size={16} /> המלצות על שגרת בוקר וערב</li>
             <li className="flex items-center gap-2 text-brand-gold"><Sparkles size={16} /> מענה על שאלות בנושא רכיבים פעילים</li>
           </ul>
-          <button 
+          <button
             onClick={onOpenAssistant}
             className="bg-brand-dark text-white px-10 py-4 rounded-full text-sm font-bold uppercase tracking-widest hover:bg-brand-gold transition-all shadow-xl flex items-center gap-3"
           >
@@ -1546,25 +1569,25 @@ function ConsultationPage({ onOpenAssistant }: { onOpenAssistant: () => void }) 
         <form onSubmit={handleSubmit} className="max-w-2xl mx-auto space-y-6">
           <div className="space-y-2">
             <label className="text-sm font-bold uppercase tracking-widest text-brand-gold">שם מלא</label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={formData.name}
-              onChange={(e) => setFormData({...formData, name: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               placeholder="ישראל ישראלי"
               className="w-full bg-brand-beige/30 border border-brand-gold/20 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-brand-gold/30"
             />
           </div>
           <div className="space-y-2">
             <label className="text-sm font-bold uppercase tracking-widest text-brand-gold">הודעה / תוכן</label>
-            <textarea 
+            <textarea
               value={formData.message}
-              onChange={(e) => setFormData({...formData, message: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, message: e.target.value })}
               placeholder="ספרי לנו במה נוכל לעזור..."
               rows={4}
               className="w-full bg-brand-beige/30 border border-brand-gold/20 rounded-2xl p-4 focus:outline-none focus:ring-2 focus:ring-brand-gold/30"
             />
           </div>
-          <button 
+          <button
             type="submit"
             disabled={isSubmitting}
             className="w-full bg-brand-gold text-white py-4 rounded-2xl font-bold uppercase tracking-widest hover:bg-brand-gold/90 transition-all shadow-lg disabled:opacity-50"
