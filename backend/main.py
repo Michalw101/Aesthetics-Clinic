@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from supabase import create_client, Client
@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 from cryptography.fernet import Fernet
 from google import genai
 from google.genai import types
+
+from auth import get_supabase_admin, require_admin
 
 # טעינת משתני סביבה מקובץ .env
 load_dotenv()
@@ -136,6 +138,48 @@ class ProductSearchResponse(BaseModel):
 class AddToCartRequest(BaseModel):
     user_id: str      
     product_id: str  
+    quantity: int = Field(default=1, gt=0)
+
+
+class AdminUserOut(BaseModel):
+    id: str
+    email: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    phone: str | None = None
+    is_admin: bool = False
+    last_sign_in_at: str | None = None
+
+
+class AdminUserUpdateRequest(BaseModel):
+    first_name: str
+    last_name: str
+    phone: str
+    is_admin: bool = False
+
+
+class AdminUserUpdateResponse(BaseModel):
+    status: str = "success"
+    message: str
+    data: dict[str, Any]
+
+
+class AdminUserDeleteResponse(BaseModel):
+    status: str = "success"
+    message: str
+    user_id: str
+
+
+class AdminOrderStatusUpdateRequest(BaseModel):
+    status: str = Field(min_length=1, max_length=50)
+
+
+class AdminOrderStatusUpdateResponse(BaseModel):
+    status: str = "success"
+    message: str
+    order_id: str
+    data: dict[str, Any] | None = None
+
     quantity: int = Field(default=1, gt=0) 
     
 class CheckoutRequest(BaseModel):
@@ -384,6 +428,151 @@ async def add_to_cart(payload: AddToCartRequest):
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"שגיאה בהוספת המוצר לעגלה: {str(e)}")
+
+
+@app.get("/api/admin/users", response_model=list[AdminUserOut])
+def list_admin_users(_admin=Depends(require_admin)):
+    """
+    Returns all users via the get_admin_users RPC (joins auth.users + public.profiles).
+    Requires a valid JWT and is_admin = true on the caller's profile.
+    """
+    supabase_admin = get_supabase_admin()
+
+    try:
+        response = supabase_admin.rpc("get_admin_users", {}).execute()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch admin users: {str(e)}",
+        ) from e
+
+    return response.data or []
+
+
+@app.put("/api/admin/users/{user_id}", response_model=AdminUserUpdateResponse)
+def update_admin_user(
+    user_id: str,
+    payload: AdminUserUpdateRequest,
+    _admin=Depends(require_admin),
+):
+    """
+    Updates a user's profile in public.profiles.
+    Requires a valid JWT and is_admin = true on the caller's profile.
+    """
+    supabase_admin = get_supabase_admin()
+
+    update_data = {
+        "first_name": payload.first_name.strip(),
+        "last_name": payload.last_name.strip(),
+        "phone": payload.phone.strip(),
+        "is_admin": payload.is_admin,
+    }
+
+    try:
+        response = (
+            supabase_admin.table("profiles")
+            .update(update_data)
+            .eq("id", user_id)
+            .execute()
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update user profile: {str(e)}",
+        ) from e
+
+    if not response.data:
+        raise HTTPException(status_code=404, detail="User profile not found")
+
+    return AdminUserUpdateResponse(
+        message="Profile updated successfully",
+        data=response.data[0],
+    )
+
+
+@app.delete("/api/admin/users/{user_id}", response_model=AdminUserDeleteResponse)
+def delete_admin_user(user_id: str, _admin=Depends(require_admin)):
+    """
+    Permanently deletes a user from Supabase Auth (and profiles via CASCADE if configured).
+    Requires a valid JWT and is_admin = true on the caller's profile.
+    """
+    supabase_admin = get_supabase_admin()
+
+    try:
+        supabase_admin.auth.admin.delete_user(user_id)
+    except Exception as auth_error:
+        # If FK blocks auth deletion, remove profile first then retry
+        try:
+            supabase_admin.table("profiles").delete().eq("id", user_id).execute()
+            supabase_admin.auth.admin.delete_user(user_id)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete user: {str(e)}",
+            ) from e
+
+    return AdminUserDeleteResponse(
+        message="User deleted successfully",
+        user_id=user_id,
+    )
+
+
+@app.get("/api/admin/orders")
+def list_admin_orders(_admin=Depends(require_admin)):
+    """
+    Returns all orders via the get_admin_orders RPC.
+    Requires a valid JWT and is_admin = true on the caller's profile.
+    """
+    supabase_admin = get_supabase_admin()
+
+    try:
+        response = supabase_admin.rpc("get_admin_orders", {}).execute()
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch admin orders: {str(e)}",
+        ) from e
+
+    return response.data or []
+
+
+@app.put(
+    "/api/admin/orders/{order_id}/status",
+    response_model=AdminOrderStatusUpdateResponse,
+)
+def update_admin_order_status(
+    order_id: str,
+    payload: AdminOrderStatusUpdateRequest,
+    _admin=Depends(require_admin),
+):
+    """
+    Updates an order's status in public.cart_items.
+    Requires a valid JWT and is_admin = true on the caller's profile.
+    """
+    supabase_admin = get_supabase_admin()
+    new_status = payload.status.strip()
+
+    try:
+        response = (
+            supabase_admin.table("cart_items")
+            .update({"status": new_status})
+            .eq("id", order_id)
+            .execute()
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update order status: {str(e)}",
+        ) from e
+
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    return AdminOrderStatusUpdateResponse(
+        message="Order status updated successfully",
+        order_id=order_id,
+        data=response.data[0],
+    )
 
 
 @app.get("/api/cart")
