@@ -1,3 +1,5 @@
+import { supabase } from './supabase'; // <--- Task 4: ייבוא סופבייס
+
 /**
  * Utility to communicate with the FastAPI backend.
  * The backend is responsible for Supabase interactions.
@@ -10,6 +12,17 @@ const API_URL = import.meta.env.DEV
 
 // שומרים גם את המשתנה שלך כדי שהתורים יעבדו בלי שינויים נוספים
 const BACKEND_URL = API_URL;
+
+// ============================================================================
+// Task 4 + 5: פונקציית עזר פנימית לשליפת טוקן האבטחה של הלקוחה המחוברת
+// ============================================================================
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) return {};
+  return {
+    Authorization: `Bearer ${session.access_token}`,
+  };
+}
 
 export type ChatTurn = {
   role: "user" | "model";
@@ -533,11 +546,25 @@ export async function sendCheckoutToBackend(
   }
 }
 
-export async function fetchUserOrdersFromBackend(
-  userId: string,
-): Promise<any[]> {
+// ============================================================================
+// Task 4 + 5: שליפת הזמנות מאובטחת (מוזרק אליה טוקן אוטומטית!)
+// ============================================================================
+export async function fetchUserOrdersFromBackend(userId: string): Promise<any[]> {
   try {
-    const response = await fetch(`${API_URL}/api/orders?user_id=${userId}`);
+    const authHeaders = await getAuthHeaders();
+
+    const response = await fetch(`${API_URL}/api/orders?user_id=${userId}`, {
+      headers: {
+        ...authHeaders,
+      },
+    });
+
+    if (response.status === 401) {
+      console.warn("🔒 Session expired. Forcing sign out...");
+      await supabase.auth.signOut(); // <--- להחזיר לפעולה!
+      window.location.href = "/";
+      throw new Error("פג תוקף ההתחברות, אנא התחברי מחדש");
+    }
 
     if (!response.ok) {
       const errorData = await response.json();
@@ -547,6 +574,6 @@ export async function fetchUserOrdersFromBackend(
     return await response.json();
   } catch (error) {
     console.error("Fetch orders API error:", error);
-    return []; // מחזירים מערך ריק כדי לא לשבור את ה-UI בשגיאה
+    return []; 
   }
 }
