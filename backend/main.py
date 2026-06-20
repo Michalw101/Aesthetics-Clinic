@@ -11,6 +11,7 @@ from google import genai
 from google.genai import types
 
 from auth import get_supabase_admin, require_admin
+from dependencies import get_current_user
 
 # טעינת משתני סביבה מקובץ .env
 load_dotenv()
@@ -718,26 +719,29 @@ class ProfileUpdateRequest(BaseModel):
     phone: str
 
 @app.put("/api/profile/update")
-async def update_profile(payload: ProfileUpdateRequest):
+async def update_profile(payload: ProfileUpdateRequest, current_user: dict = Depends(get_current_user)):
     """
-    מקבל את הפרטים המעודכנים מהמשתמש ושומר אותם בטבלת profiles ב-Supabase.
+    מקבל את הפרטים המעודכנים ומאומת מול טוקן ה-JWT.
+    מונע ממישהו לעדכן פרופיל של משתמש אחר (מניעת פירצת IDOR).
     """
     if not supabase:
         raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
     
+    # הגנה: מוודאים שהמשתמש מנסה לעדכן אך ורק את ה-UID של עצמו
+    if payload.user_id != current_user["uid"]:
+        raise HTTPException(status_code=403, detail="Forbidden: Cannot update another user's profile")
+
     try:
-        # אלו הנתונים שנרצה לעדכן בטבלה
         data_to_update = {
             "first_name": payload.first_name.strip(),
             "last_name": payload.last_name.strip(),
             "phone": payload.phone.strip()
         }
         
-        # מבצעים Update לטבלת profiles במקום בו ה-id תואם למשתמש הנוכחי
         response = (
             supabase.table("profiles")
             .update(data_to_update)
-            .eq("id", payload.user_id)
+            .eq("id", current_user["uid"])  # משתמשים ב-UID הבטוח מהטוקן
             .execute()
         )
         
@@ -748,7 +752,7 @@ async def update_profile(payload: ProfileUpdateRequest):
         }
         
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"שגיאה בעדכון הפרופיל: {str(e)}")      
+        raise HTTPException(status_code=400, detail=f"שגיאה בעדכון הפרופיל: {str(e)}")     
     
 # ==========================================
 # (ספרינט 2 - Checkout)
@@ -801,24 +805,24 @@ async def checkout(payload: CheckoutRequest):
 # שליפת הזמנות עבור משתמש ספציפי (Checkout ספרינט 2)
 # ==========================================
 @app.get("/api/orders")
-async def get_user_orders(user_id: str):
+async def get_user_orders(user_id: str, current_user: dict = Depends(get_current_user)):
+    """
+    Task 3: שליפת היסטוריית הזמנות מאובטחת.
+    """
     if not supabase:
         raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
     
+    # אם מישהו מנסה לדחוף ל-URL מזהה של לקוחה אחרת - נזרוק אותו בבעיטה
+    if user_id != current_user["uid"]:
+        raise HTTPException(status_code=403, detail="Access denied to other users' order history.")
+    
     try:
-        # שינינו את descending=True ל- desc=True
         response = supabase.table("orders") \
             .select("*") \
-            .eq("client_uid", user_id) \
+            .eq("client_uid", current_user["uid"]) \
             .order("created_at", desc=True) \
             .execute()
             
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"שגיאה בשליפת ההזמנות: {str(e)}")
-
-
-if __name__ == "__main__":
-    import uvicorn
-    # הרצה על פורט 3000 כברירת מחדל
-    uvicorn.run(app, host="0.0.0.0", port=3000)
