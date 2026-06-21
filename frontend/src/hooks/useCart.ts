@@ -27,20 +27,20 @@ export function useCart(userId: string | undefined) {
 
   // 2. פונקציית הוספה לעגלה (תומכת גם בלוקאלי וגם בבאקנד)
   const addToCart = async (product: any) => {
-    // אופטימיזציה לוקאלית: מעדכנים מיד ב-State כדי שהמשתמש יראה תגובה מיידית ב-UI
+    let nextQty = 1;
+
     setCart((prev) => {
       const existingItemIdx = prev.findIndex(
         (item) => item.product_id === product.id || item.id === product.id,
       );
 
       if (existingItemIdx > -1) {
-        // המוצר כבר קיים בעגלה לוקאלית -> נגדיל כמות
         const newCart = [...prev];
-        newCart[existingItemIdx].quantity =
-          (newCart[existingItemIdx].quantity || 1) + 1;
+        nextQty = (newCart[existingItemIdx].quantity || 1) + 1;
+        newCart[existingItemIdx].quantity = nextQty;
         return newCart;
       } else {
-        // מוצר חדש -> נוסיף אותו עם כמות 1
+        nextQty = 1;
         return [...prev, { ...product, product_id: product.id, quantity: 1 }];
       }
     });
@@ -50,10 +50,9 @@ export function useCart(userId: string | undefined) {
       duration: 2000,
     });
 
-    // סנכרון מול הבאקנד (ברגע שיהיה מוכן)
     if (userId) {
-      // אנחנו לא מחכים לזה (Async ברקע) כדי לא לתקוע את ה-UI
-      addProductToBackendCart(userId, product.id, 1);
+      // שולחים את הכמות הכוללת המעודכנת (nextQty) במקום תמיד 1
+      addProductToBackendCart(userId, product.id, nextQty);
     }
   };
 
