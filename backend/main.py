@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from cryptography.fernet import Fernet
 from google import genai
 from google.genai import types
+from datetime import datetime, timedelta
 
 from auth import get_supabase_admin, require_admin
 from dependencies import get_current_user
@@ -122,7 +123,16 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
 
+class WeeklyDayConfig(BaseModel):
+    id: int
+    day: str
+    isOpen: bool
+    start: str
+    end: str
 
+class ClinicScheduleUpdate(BaseModel):
+    weekly_schedule: list[WeeklyDayConfig]
+    blocked_dates: list[str]
 # =========================================================
 # סכמות נתונים חדשות עבור מערכת התורים (Pydantic Models) - של ציפורה
 # =========================================================
@@ -401,39 +411,102 @@ async def update_appointment_status(appointment_id: int, status_update: Appointm
 # נתיבים (Routes) חדשים עבור מערכת התורים
 # =========================================================
 
-@app.get("/api/appointments/available-slots")
-async def get_available_slots(date: str):
-    """
-    מקבל תאריך (YYYY-MM-DD) ומחזיר את חלונות הזמן הפנויים באותו יום.
-    """
+# =========================================================
+# נתיבים (Routes) מעודכנים למערכת התורים וניהול היומן
+# =========================================================
+
+@app.get("/api/admin/schedule")
+async def get_clinic_schedule():
+    """שולף את הגדרות היומן של המנהלת"""
     if not supabase:
         raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
     
-    # שעות הפעילות המוגדרות של הקליניקה (ניתן לשנות בהתאם לצורך)
-    all_possible_slots = ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"]
+    response = supabase.table("clinic_schedule").select("*").eq("id", 1).execute()
+    if not response.data:
+        return {"weekly_schedule": [], "blocked_dates": []}
+    return response.data[0]
+
+
+@app.put("/api/admin/schedule")
+async def update_clinic_schedule(schedule: ClinicScheduleUpdate):
+    """שומר את הגדרות היומן (ימי פעילות ושעות, ימים חסומים)"""
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר כראוי")
+    
+    data_to_save = {
+        "weekly_schedule": [day.model_dump() for day in schedule.weekly_schedule],
+        "blocked_dates": schedule.blocked_dates
+    }
+    
+    # עדכון השורה הקבועה (id=1)
+    response = supabase.table("clinic_schedule").update(data_to_save).eq("id", 1).execute()
+    return {"status": "success", "message": "הגדרות היומן עודכנו", "data": response.data}
+
+
+@app.get("/api/appointments/available-slots")
+async def get_available_slots(date: str):
+    """
+    מחשב שעות פנויות דינמיות לפי:
+    1. תאריכים חסומים (חופשים).
+    2. שעות פתיחה וסגירה ביום הספציפי בשבוע.
+    3. תורים שכבר נקבעו בפועל.
+    """
+    if not supabase:
+        raise HTTPException(status_code=503, detail="חיבור ל-Supabase לא הוגדר")
     
     try:
-        # שליפת כל התורים התפוסים לאותו תאריך שאינם מבוטלים
-        response = supabase.table("appointments") \
+        # 1. שליפת הגדרות היומן של הקליניקה
+        schedule_res = supabase.table("clinic_schedule").select("*").eq("id", 1).execute()
+        if not schedule_res.data:
+            return {"date": date, "available_slots": []}
+            
+        settings = schedule_res.data[0]
+        blocked_dates = settings.get("blocked_dates", [])
+        weekly_schedule = settings.get("weekly_schedule", [])
+
+        # בדיקה האם התאריך נחסם ידנית ע"י המנהלת
+        if date in blocked_dates:
+            return {"date": date, "available_slots": []} # יום חופש, אין תורים
+
+        # 2. מציאת איזה יום בשבוע זה (ב-JS יום א' זה 0, בפייתון יום ב' זה 0. נתרגם:)
+        target_date = datetime.strptime(date, "%Y-%m-%d")
+        js_day_index = (target_date.weekday() + 1) % 7 
+        
+        # שליפת הגדרת היום הספציפי מתוך המערך השבועי
+        day_config = next((d for d in weekly_schedule if d["id"] == js_day_index), None)
+        
+        # אם היום מסומן כסגור או שלא נמצאה הגדרה - מחזירים מערך ריק
+        if not day_config or not day_config.get("isOpen"):
+            return {"date": date, "available_slots": []}
+
+        # 3. יצירת רשימת כל השעות האפשריות באותו יום (כל שעה עגולה)
+        start_time = datetime.strptime(day_config["start"], "%H:%M")
+        end_time = datetime.strptime(day_config["end"], "%H:%M")
+        
+        all_possible_slots = []
+        current_time = start_time
+        # מייצר חלונות של שעה עד לשעת הסגירה
+        while current_time < end_time:
+            all_possible_slots.append(current_time.strftime("%H:%M"))
+            current_time += timedelta(hours=1)
+
+        # 4. שליפת התורים התפוסים ב-DB
+        appointments_res = supabase.table("appointments") \
             .select("appointment_time") \
             .eq("appointment_date", date) \
             .neq("status", "canceled") \
             .execute()
+            
+        booked_slots = [row["appointment_time"] for row in appointments_res.data]
         
-        # חילוץ השעות התפוסות מתוך תוצאות השילפה
-        booked_slots = [row["appointment_time"] for row in response.data]
-        
-        # סינון חלונות הזמן - משאירים רק את השעות שלא קיימות ב-booked_slots
+        # 5. סינון שעות שכבר נתפסו
         available_slots = [slot for slot in all_possible_slots if slot not in booked_slots]
         
-        return {
-            "date": date,
-            "available_slots": available_slots
-        }
+        return {"date": date, "available_slots": available_slots}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"שגיאה בשליפת חלונות זמן פנויים: {str(e)}")
-
+    
 @app.get("/api/appointments")
 async def get_all_appointments():
     """שליפת כל התורים מהמסד והחזרתם לפרונטאנד"""
