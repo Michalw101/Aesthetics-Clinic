@@ -577,3 +577,30 @@ export async function fetchUserOrdersFromBackend(userId: string): Promise<any[]>
     return []; 
   }
 }
+// ============================================================================
+// פונקציות מנהל ליומן וזמינות (Admin Schedule)
+// ============================================================================
+
+export async function fetchClinicSchedule() {
+  const response = await fetch(`${BACKEND_URL}/api/admin/schedule`);
+  if (!response.ok) {
+    throw new Error("שגיאה בטעינת הגדרות היומן");
+  }
+  return response.json();
+}
+
+export async function updateClinicSchedule(payload: { weekly_schedule: any[], blocked_dates: string[] }) {
+  const response = await fetch(`${BACKEND_URL}/api/admin/schedule`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.detail || "שגיאה בשמירת הגדרות היומן");
+  }
+  return response.json();
+}

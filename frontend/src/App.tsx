@@ -48,6 +48,7 @@ import { formatDisplayDate } from "./lib/format";
 import { useCart } from "./hooks/useCart";
 import { supabase } from "./lib/supabase";
 import UpdatePassword from "./components/UpdatePassword";
+import { fetchClinicSchedule, updateClinicSchedule } from "./lib/api";
 
 type Page =
   | "home"
@@ -1763,6 +1764,26 @@ function AdminDashboard({
     | "treatments"
     | "users"
   >("appointments");
+  
+
+  // --- ניהול תורים ויומן ---
+  const [appointmentSubTab, setAppointmentSubTab] = useState<"list" | "availability">("list");
+  
+  // מצב זמני (State) להגדרות יומן - בהמשך יחובר לבקאנד
+  const [weeklySchedule, setWeeklySchedule] = useState([
+    { id: 0, day: "ראשון", isOpen: true, start: "09:00", end: "18:00" },
+    { id: 1, day: "שני", isOpen: true, start: "09:00", end: "18:00" },
+    { id: 2, day: "שלישי", isOpen: true, start: "09:00", end: "18:00" },
+    { id: 3, day: "רביעי", isOpen: true, start: "09:00", end: "18:00" },
+    { id: 4, day: "חמישי", isOpen: true, start: "09:00", end: "18:00" },
+    { id: 5, day: "שישי", isOpen: false, start: "09:00", end: "13:00" },
+    { id: 6, day: "שבת", isOpen: false, start: "00:00", end: "00:00" },
+  ]);
+  const [blockedDateInput, setBlockedDateInput] = useState("");
+  const [blockedDates, setBlockedDates] = useState<string[]>([]);
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
+
+  // --- ניהול בלוג וטיפולים ---
   const [newPost, setNewPost] = useState({
     title: "",
     content: "",
@@ -1773,6 +1794,14 @@ function AdminDashboard({
     description: "",
     price: "",
   });
+  useEffect(() => {
+  if (appointmentSubTab === "availability") {
+    fetchClinicSchedule().then(data => {
+      if (data.weekly_schedule?.length > 0) setWeeklySchedule(data.weekly_schedule);
+      if (data.blocked_dates) setBlockedDates(data.blocked_dates);
+    }).catch(console.error);
+  }
+}, [appointmentSubTab]);
 
   const handleAddPost = async () => {
     if (!newPost.title || !newPost.content) return;
@@ -1786,152 +1815,206 @@ function AdminDashboard({
     setNewTreatment({ name: "", description: "", price: "" });
   };
 
+  const handleToggleDay = (id: number) => {
+    setWeeklySchedule(weeklySchedule.map(day => 
+      day.id === id ? { ...day, isOpen: !day.isOpen } : day
+    ));
+  };
+
+  const handleTimeChange = (id: number, field: "start" | "end", value: string) => {
+    setWeeklySchedule(weeklySchedule.map(day => 
+      day.id === id ? { ...day, [field]: value } : day
+    ));
+  };
+
+  const handleAddBlockedDate = () => {
+    if (blockedDateInput && !blockedDates.includes(blockedDateInput)) {
+      setBlockedDates([...blockedDates, blockedDateInput]);
+      setBlockedDateInput("");
+    }
+  };
+
+  const handleRemoveBlockedDate = (dateToRemove: string) => {
+    setBlockedDates(blockedDates.filter(date => date !== dateToRemove));
+  };
+
+  const saveAvailabilitySettings = async () => {
+  setIsSavingSchedule(true);
+  try {
+    await updateClinicSchedule({ 
+      weekly_schedule: weeklySchedule, 
+      blocked_dates: blockedDates 
+    });
+    toast.success("הגדרות היומן נשמרו בהצלחה!");
+  } catch (error) {
+    toast.error("שגיאה בשמירת הגדרות היומן.");
+  } finally {
+    setIsSavingSchedule(false);
+  }
+};
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       className="max-w-7xl mx-auto px-6 py-12 space-y-12"
     >
+      {/* תפריט עליון קיים... */}
       <div className="text-center space-y-4">
         <h2 className="text-4xl serif font-semibold">ניהול קליניקה</h2>
         <div className="flex justify-center gap-4 flex-wrap">
-          <button
-            onClick={() => setTab("appointments")}
-            className={cn(
-              "px-6 py-2 rounded-full text-sm font-bold transition-all",
-              tab === "appointments"
-                ? "bg-brand-gold text-white"
-                : "bg-white text-brand-dark",
-            )}
-          >
-            תורים
-          </button>
-          <button
-            onClick={() => setTab("orders")}
-            className={cn(
-              "px-6 py-2 rounded-full text-sm font-bold transition-all",
-              tab === "orders"
-                ? "bg-brand-gold text-white"
-                : "bg-white text-brand-dark",
-            )}
-          >
-            הזמנות
-          </button>
-          <button
-            onClick={() => setTab("products")}
-            className={cn(
-              "px-6 py-2 rounded-full text-sm font-bold transition-all",
-              tab === "products"
-                ? "bg-brand-gold text-white"
-                : "bg-white text-brand-dark",
-            )}
-          >
-            מוצרים
-          </button>
-          <button
-            onClick={() => setTab("blog")}
-            className={cn(
-              "px-6 py-2 rounded-full text-sm font-bold transition-all",
-              tab === "blog"
-                ? "bg-brand-gold text-white"
-                : "bg-white text-brand-dark",
-            )}
-          >
-            בלוג
-          </button>
-          <button
-            onClick={() => setTab("reviews")}
-            className={cn(
-              "px-6 py-2 rounded-full text-sm font-bold transition-all",
-              tab === "reviews"
-                ? "bg-brand-gold text-white"
-                : "bg-white text-brand-dark",
-            )}
-          >
-            ביקורות
-          </button>
-          <button
-            onClick={() => setTab("treatments")}
-            className={cn(
-              "px-6 py-2 rounded-full text-sm font-bold transition-all",
-              tab === "treatments"
-                ? "bg-brand-gold text-white"
-                : "bg-white text-brand-dark",
-            )}
-          >
-            טיפולים
-          </button>
-          <button
-            onClick={() => setTab("users")}
-            className={cn(
-              "px-6 py-2 rounded-full text-sm font-bold transition-all",
-              tab === "users"
-                ? "bg-brand-gold text-white"
-                : "bg-white text-brand-dark",
-            )}
-          >
-            משתמשים
-          </button>
+          {["appointments", "orders", "products", "blog", "reviews", "treatments", "users"].map((t) => (
+             <button
+             key={t}
+             onClick={() => setTab(t as any)}
+             className={cn(
+               "px-6 py-2 rounded-full text-sm font-bold transition-all",
+               tab === t ? "bg-brand-gold text-white" : "bg-white text-brand-dark"
+             )}
+           >
+             {t === "appointments" ? "תורים" :
+              t === "orders" ? "הזמנות" :
+              t === "products" ? "מוצרים" :
+              t === "blog" ? "בלוג" :
+              t === "reviews" ? "ביקורות" :
+              t === "treatments" ? "טיפולים" : "משתמשים"}
+           </button>
+          ))}
         </div>
       </div>
 
-      <div className="bg-white rounded-3xl border border-brand-gold/10 shadow-xl overflow-hidden">
+      <div className="bg-white rounded-3xl border border-brand-gold/10 shadow-xl overflow-hidden min-h-[500px]">
         {tab === "appointments" && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-right">
-              <thead className="bg-brand-beige/50 text-xs uppercase tracking-widest text-brand-gold">
-                <tr>
-                  <th className="p-6">לקוחה</th>
-                  <th className="p-6">טיפול</th>
-                  <th className="p-6">תאריך ושעה</th>
-                  <th className="p-6">סטטוס</th>
-                  <th className="p-6">פעולות</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-brand-gold/10">
-                {appointments.map((app: any) => (
-                  <tr key={app.id}>
-                    <td className="p-6 font-bold">{app.clientName}</td>
-                    <td className="p-6">{app.treatmentName}</td>
-                    <td className="p-6 text-sm">
-                      {app.date} | {app.time}
-                    </td>
-                    <td className="p-6">
-                      <span
-                        className={cn(
-                          "text-[10px] font-bold uppercase px-2 py-0.5 rounded-full",
-                          app.status === "scheduled"
-                            ? "bg-green-100 text-green-700"
-                            : "bg-red-100 text-red-700",
+          <div className="flex flex-col">
+            {/* תת-תפריט לניהול תורים */}
+            <div className="flex border-b border-brand-gold/10 bg-brand-beige/20">
+              <button 
+                onClick={() => setAppointmentSubTab("list")}
+                className={cn("flex-1 py-4 text-sm font-bold transition-colors", appointmentSubTab === "list" ? "text-brand-gold border-b-2 border-brand-gold" : "text-brand-dark/60 hover:text-brand-dark")}
+              >
+                רשימת תורים
+              </button>
+              <button 
+                onClick={() => setAppointmentSubTab("availability")}
+                className={cn("flex-1 py-4 text-sm font-bold transition-colors", appointmentSubTab === "availability" ? "text-brand-gold border-b-2 border-brand-gold" : "text-brand-dark/60 hover:text-brand-dark")}
+              >
+                ניהול יומן וזמינות
+              </button>
+            </div>
+
+            {appointmentSubTab === "list" ? (
+               <div className="overflow-x-auto">
+               <table className="w-full text-right">
+                 <thead className="bg-brand-beige/50 text-xs uppercase tracking-widest text-brand-gold">
+                   <tr>
+                     <th className="p-6">לקוחה</th>
+                     <th className="p-6">טיפול</th>
+                     <th className="p-6">תאריך ושעה</th>
+                     <th className="p-6">סטטוס</th>
+                     <th className="p-6">פעולות</th>
+                   </tr>
+                 </thead>
+                 <tbody className="divide-y divide-brand-gold/10">
+                   {appointments.map((app: any) => (
+                     <tr key={app.id}>
+                       <td className="p-6 font-bold">{app.clientName}</td>
+                       <td className="p-6">{app.treatmentName}</td>
+                       <td className="p-6 text-sm">
+                         {app.date} | {app.time}
+                       </td>
+                       <td className="p-6">
+                         <span
+                           className={cn(
+                             "text-[10px] font-bold uppercase px-2 py-0.5 rounded-full",
+                             app.status === "scheduled"
+                               ? "bg-green-100 text-green-700"
+                               : "bg-red-100 text-red-700",
+                           )}
+                         >
+                           {app.status === "scheduled" ? "מאושר" : "מבוטל"}
+                         </span>
+                       </td>
+                       <td className="p-6">
+                         <div className="flex gap-2">
+                           <button
+                             onClick={() => onUpdateAppointment(app.id, "completed")}
+                             title="סמני כהושלם"
+                             className="p-2 hover:bg-green-50 text-green-600 rounded-full"
+                           >
+                             <CheckCircle2 size={18} />
+                           </button>
+                           <button
+                             onClick={() => onUpdateAppointment(app.id, "cancelled")}
+                             title="ביטול תור"
+                             className="p-2 hover:bg-red-50 text-red-600 rounded-full"
+                           >
+                             <X size={18} />
+                           </button>
+                         </div>
+                       </td>
+                     </tr>
+                   ))}
+                 </tbody>
+               </table>
+             </div>
+            ) : (
+              // מסך ניהול יומן חדש
+              <div className="p-8 space-y-10">
+                <div className="space-y-6">
+                  <h3 className="text-xl serif font-semibold text-brand-dark">שעות פעילות שבועיות</h3>
+                  <div className="grid gap-4">
+                    {weeklySchedule.map((day) => (
+                      <div key={day.id} className="flex items-center gap-4 bg-brand-beige/20 p-4 rounded-xl border border-brand-gold/10">
+                        <div className="w-24 font-bold">{day.day}</div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input type="checkbox" className="sr-only peer" checked={day.isOpen} onChange={() => handleToggleDay(day.id)} />
+                          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-gold"></div>
+                        </label>
+                        <span className="text-sm w-16">{day.isOpen ? 'פתוח' : 'סגור'}</span>
+                        
+                        {day.isOpen && (
+                          <div className="flex items-center gap-2">
+                            <input type="time" value={day.start} onChange={(e) => handleTimeChange(day.id, "start", e.target.value)} className="p-2 text-sm rounded-lg border border-brand-gold/20 focus:outline-none" />
+                            <span>-</span>
+                            <input type="time" value={day.end} onChange={(e) => handleTimeChange(day.id, "end", e.target.value)} className="p-2 text-sm rounded-lg border border-brand-gold/20 focus:outline-none" />
+                          </div>
                         )}
-                      >
-                        {app.status}
-                      </span>
-                    </td>
-                    <td className="p-6">
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() =>
-                            onUpdateAppointment(app.id, "completed")
-                          }
-                          className="p-2 hover:bg-green-50 text-green-600 rounded-full"
-                        >
-                          <CheckCircle2 size={18} />
-                        </button>
-                        <button
-                          onClick={() =>
-                            onUpdateAppointment(app.id, "cancelled")
-                          }
-                          className="p-2 hover:bg-red-50 text-red-600 rounded-full"
-                        >
-                          <X size={18} />
-                        </button>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-4 pt-6 border-t border-brand-gold/10">
+                  <h3 className="text-xl serif font-semibold text-brand-dark">תאריכים חסומים (ימי חופש)</h3>
+                  <div className="flex gap-4 max-w-md">
+                    <input type="date" value={blockedDateInput} onChange={(e) => setBlockedDateInput(e.target.value)} className="flex-1 p-3 rounded-xl border border-brand-gold/20 focus:outline-none focus:ring-2 focus:ring-brand-gold/30" />
+                    <button onClick={handleAddBlockedDate} className="bg-brand-dark text-white px-6 rounded-xl font-bold hover:bg-brand-gold transition-colors">
+                      הוספה
+                    </button>
+                  </div>
+                  {blockedDates.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-4">
+                      {blockedDates.map(date => (
+                        <div key={date} className="bg-red-50 text-red-700 px-4 py-2 rounded-lg flex items-center gap-2 border border-red-100 text-sm font-bold">
+                          {new Date(date).toLocaleDateString('he-IL')}
+                          <button onClick={() => handleRemoveBlockedDate(date)} className="hover:text-red-900"><X size={14} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-6">
+                  <button 
+                    onClick={saveAvailabilitySettings}
+                    disabled={isSavingSchedule}
+                    className="bg-brand-gold text-white px-8 py-3 rounded-xl font-bold hover:bg-brand-gold/90 transition-all shadow-lg disabled:opacity-50"
+                  >
+                    {isSavingSchedule ? "שומר..." : "שמירת הגדרות יומן"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
