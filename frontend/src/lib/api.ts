@@ -201,9 +201,11 @@ export async function fetchAvailableSlots(date: string): Promise<string[]> {
 }
 
 // 2. שמירת תור חדש בבסיס הנתונים
+// 2. שמירת תור חדש בבסיס הנתונים
 export async function createAppointment(appointmentData: {
   client_name: string;
   phone: string;
+  customer_email: string; // <--- השדה החדש שהוספנו
   treatment_type: string;
   appointment_date: string;
   appointment_time: string;

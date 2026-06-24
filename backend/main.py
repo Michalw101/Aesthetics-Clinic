@@ -11,8 +11,12 @@ from google import genai
 from google.genai import types
 from datetime import datetime, timedelta
 
+
 from auth import get_supabase_admin, require_admin
 from dependencies import get_current_user
+
+import smtplib
+from email.mime.text import MIMEText
 
 # טעינת משתני סביבה מקובץ .env
 load_dotenv()
@@ -139,6 +143,7 @@ class ClinicScheduleUpdate(BaseModel):
 class AppointmentCreate(BaseModel):
     client_name: str
     phone: str
+    customer_email: str  # <--- השדה החדש שנוסף
     treatment_type: str
     appointment_date: str  # פורמט צפוי: YYYY-MM-DD
     appointment_time: str  # פורמט צפוי: HH:MM
@@ -519,7 +524,30 @@ async def get_all_appointments():
         return response.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"שגיאה בשליפת התורים: {str(e)}")
+def send_confirmation_email(recipient_email: str, customer_name: str, date: str, time: str):
+    sender_email = os.getenv("SMTP_EMAIL")
+    sender_password = os.getenv("SMTP_PASSWORD")
     
+    if not sender_email or not sender_password:
+        print("⚠️ אזהרה: פרטי התחברות למייל חסרים בקובץ .env, המייל לא נשלח.")
+        return
+
+    body = f"שלום {customer_name},\n\nהתור שלך נקבע בהצלחה לתאריך {date} בשעה {time}.\nנשמח לראותך בקליניקה Aesthetics!"
+    
+    msg = MIMEText(body, 'plain', 'utf-8')
+    msg['Subject'] = 'אישור הזמנת תור - Aesthetics Clinic'
+    msg['From'] = sender_email
+    msg['To'] = recipient_email
+
+    try:
+        # התחברות לשרת ה-SMTP של גוגל ושליחת ההודעה
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+            print(f"📧 אישור נשלח בהצלחה למייל: {recipient_email}")
+    except Exception as e:
+        print(f"❌ שגיאה בשליחת המייל: {str(e)}")   
+
 @app.post("/api/appointments/book")
 async def book_appointment(appointment: AppointmentCreate):
     """
@@ -552,7 +580,12 @@ async def book_appointment(appointment: AppointmentCreate):
         
         # שמירת התור בטבלה
         response = supabase.table("appointments").insert(new_row).execute()
-        
+        send_confirmation_email(
+            recipient_email=appointment.customer_email,
+            customer_name=appointment.client_name,
+            date=appointment.appointment_date,
+            time=appointment.appointment_time
+        )
         return {
             "status": "success",
             "message": "התור נקבע בהצלחה!",
