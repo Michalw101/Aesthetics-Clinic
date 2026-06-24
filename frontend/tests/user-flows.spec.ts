@@ -10,7 +10,6 @@ test('התחברות מוצלחת למערכת', async ({ page }) => {
   await page.getByRole('textbox', { name: 'אימייל' }).fill('sarablass6236@gmail.com');
   await page.getByRole('textbox', { name: 'סיסמה' }).fill('123456');
   
-  // הוספנו force: true כדי שגם Webkit יעבור כאן חלק
   await page.getByRole('button', { name: 'התחברי' }).click({ force: true });
 
   await page.waitForTimeout(2000); 
@@ -26,8 +25,6 @@ test('עדכון פרטי פרופיל משתמשת', async ({ page }) => {
   await page.getByRole('button', { name: 'התחברות' }).click({ force: true });
   await page.getByRole('textbox', { name: 'אימייל' }).fill('sarablass6236@gmail.com');
   await page.getByRole('textbox', { name: 'סיסמה' }).fill('123456');
-  
-  // הוספנו force: true גם בהתחברות של הטסט השני
   await page.getByRole('button', { name: 'התחברי' }).click({ force: true });
 
   const profileLink = page.getByRole('button', { name: /שלום,/ });
@@ -44,8 +41,26 @@ test('עדכון פרטי פרופיל משתמשת', async ({ page }) => {
   await page.getByRole('button', { name: 'שמירת שינויים' }).click();
 
   await expect(page.getByText('הפרופיל עודכן בהצלחה!')).toBeVisible();
-
-  // --- הפתרון ל-Strict Mode ---
-  // הגדרנו לו לחפש אך ורק אלמנט מסוג "כותרת" (H2) שמכיל את השם, במקום סתם טקסט כללי
   await expect(page.getByRole('heading', { name: 'שרה בלסברגר' })).toBeVisible();
+});
+
+
+// ================================================================
+// טסט 3: חנות המוצרים - טעינת קטלוג מהבק-אנד והוספה לסל (US 19)
+// ================================================================
+test('צפייה בקטלוג החנות והוספת מוצר לסל הקניות', async ({ page }) => {
+  await page.goto('http://localhost:3000/');
+  
+  // --- הפתרון המדויק: exact: true אומר לו להתעלם מהפוטר ---
+  await page.getByRole('button', { name: 'חנות', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'חנות מוצרים' })).toBeVisible();
+
+  const serumCard = page.locator('.group').filter({ hasText: 'סרום חומצה היאלורונית' });
+  await expect(serumCard).toBeVisible();
+
+  await serumCard.locator('button').click();
+
+  const cartCounterBadge = page.locator('nav').getByText('1', { exact: true });
+  await expect(cartCounterBadge).toBeVisible();
 });
