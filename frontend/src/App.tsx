@@ -1229,6 +1229,7 @@ function BookingPage({
 }) {
   const [bookingData, setBookingData] = useState({
     clientName: profile?.name || "",
+    email: profile?.email || "", // <--- הוספת אימייל (ישאב אוטומטית אם המשתמשת מחוברת)
     phone: "",
     treatment: "טיפול פנים קלאסי",
     date: "",
@@ -1261,11 +1262,18 @@ function BookingPage({
     e.preventDefault();
     if (
       !bookingData.clientName.trim() ||
+      !bookingData.email.trim() || // ולידציה לאימייל ריק
       !bookingData.phone.trim() ||
       !bookingData.date ||
       !bookingData.time
     ) {
       toast.error("אנא מלאי את כל השדות בטופס");
+      return;
+    }
+    // 2. ולידציה לתקינות כתובת אימייל
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(bookingData.email.trim())) {
+      toast.error("אנא הזיני כתובת אימייל תקינה");
       return;
     }
     const phoneRegex = /^05\d-?\d{7}$/;
@@ -1278,12 +1286,12 @@ function BookingPage({
       await createAppointment({
         client_name: bookingData.clientName,
         phone: bookingData.phone,
+        customer_email: bookingData.email.trim(), // <--- שולחים את האימייל לשרת
         treatment_type: bookingData.treatment,
         appointment_date: bookingData.date,
         appointment_time: bookingData.time,
       });
-      toast.success("התור נקבע בהצלחה וממתין לך במערכת!");
-      onNavigate("profile");
+toast.success("התור נקבע בהצלחה וממתין לך במערכת! אישור נשלח למייל.");      onNavigate("profile");
     } catch (error: any) {
       toast.error(error.message || "חלה שגיאה בקביעת התור, אנא נסי שוב");
     } finally {
@@ -1321,6 +1329,21 @@ function BookingPage({
                 setBookingData({ ...bookingData, clientName: e.target.value })
               }
               className="w-full bg-brand-beige/30 border border-brand-gold/20 rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-brand-gold/30"
+            />
+          </div>
+          <div className="space-y-4">
+            <label className="block text-sm font-bold uppercase tracking-widest text-brand-gold">
+              אימייל לאישור התור
+            </label>
+            <input
+              type="email"
+              placeholder="example@gmail.com"
+              value={bookingData.email}
+              onChange={(e) =>
+                setBookingData({ ...bookingData, email: e.target.value })
+              }
+              className="w-full bg-brand-beige/30 border border-brand-gold/20 rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-brand-gold/30"
+              dir="ltr"
             />
           </div>
           <div className="space-y-4">
