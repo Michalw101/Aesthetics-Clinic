@@ -159,13 +159,19 @@ docker compose up --build
 ```
 ## Running Tests
 
-### Frontend Tests
-The frontend includes a test suite located in the `frontend/src/tests` (or `frontend/tests`) directory. To run the tests, open your terminal and navigate to the frontend folder:
+1. Navigate to the frontend directory:
+   ```bash
+   cd frontend
+    ```
+Run tests in headless mode (in the background):
 
-```bash
-cd frontend
-npm run test
-```
+Bash
+npx playwright test
+Run tests with the Interactive UI Mode (recommended for visual debugging):
+
+Bash
+npx playwright test --ui
+First-time setup: If Playwright is not installed yet on your machine, run npm i -D @playwright/test and then npx playwright install inside the frontend folder to download the required browsers.
 
 | Service | URL |
 |---------|-----|
