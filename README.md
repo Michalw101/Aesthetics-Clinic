@@ -165,12 +165,14 @@ docker compose up --build
     ```
 Run tests in headless mode (in the background):
 
-Bash
+```Bash
 npx playwright test
+```
 Run tests with the Interactive UI Mode (recommended for visual debugging):
 
-Bash
+```Bash
 npx playwright test --ui
+```
 First-time setup: If Playwright is not installed yet on your machine, run npm i -D @playwright/test and then npx playwright install inside the frontend folder to download the required browsers.
 
 | Service | URL |
