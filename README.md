@@ -157,6 +157,15 @@ From the project root, configure `backend/.env` first, then:
 ```bash
 docker compose up --build
 ```
+## Running Tests
+
+### Frontend Tests
+The frontend includes a test suite located in the `frontend/src/tests` (or `frontend/tests`) directory. To run the tests, open your terminal and navigate to the frontend folder:
+
+```bash
+cd frontend
+npm run test
+```
 
 | Service | URL |
 |---------|-----|
